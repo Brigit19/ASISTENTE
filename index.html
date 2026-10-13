@@ -118,6 +118,21 @@ h1{font-family:var(--f-display);letter-spacing:.06em}
 }
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes breathe{0%,100%{transform:scale(.92);opacity:.85}50%{transform:scale(1.06);opacity:1}}
+
+header .hbtns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.avlist{display:flex;flex-direction:column;gap:8px}
+.avrow{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n t" "m x";gap:6px 10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.avrow .avn{grid-area:n;font-weight:700}.avrow select{grid-area:m;min-width:0}.avrow [data-test]{grid-area:t;justify-self:end}.avrow .avmin{grid-area:x;font-size:.85rem;color:var(--muted);align-self:center}
+.avmin input{width:64px}
+.allist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.allist li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.allist li.off{opacity:.55}.allist li.off b{text-decoration:line-through}
+.allist .alt{display:flex;flex-direction:column;flex:1;min-width:140px}.allist small{color:var(--muted)}
+.allist .grow,.ask .grow{flex:1;min-width:140px}
+.hlist{display:flex;flex-direction:column;gap:10px}.hcard{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}.hcard>input[type=text]{font-weight:700;width:100%}
+.diag{color:var(--bad);word-break:break-word}
+.orb[data-st="piensa"] b{background:radial-gradient(circle,#fff 0%,#d6f4ff 20%,#7fd6ff 48%,#7fd6ff00 74%);box-shadow:0 0 60px #7fd6ffaa}
+@media (prefers-reduced-motion:no-preference){.orb[data-st="piensa"] i:nth-child(1){animation-duration:1.2s}.orb[data-st="piensa"] i:nth-child(3){animation-duration:3s}}
 </style>
 
 <div class="wrap">
@@ -126,13 +141,17 @@ h1{font-family:var(--f-display);letter-spacing:.06em}
       <h1>BELA</h1>
       <p class="sub">Tu asistente personal. Organiza tu día con el negocio, la universidad y la iglesia, y te avisa a tiempo sin quitarte horas de sueño.</p>
     </div>
-    <span class="sync" id="sync">Guardado en tu celular</span>
+    <div class="hbtns"><span class="sync" id="sync">Guardado en tu celular</span>
+      <button class="btn ghost sm" id="btnReini" aria-label="Reiniciar BELA">⟳ Reiniciar</button>
+      <button class="btn ghost sm" id="btnCerrar" aria-label="Cerrar BELA">⏻ Cerrar</button></div>
   </header>
 
   <nav role="tablist">
     <button role="tab" data-tab="asistente" aria-selected="true">BELA</button>
     <button role="tab" data-tab="hoy" aria-selected="false">Mi día</button>
     <button role="tab" data-tab="semana" aria-selected="false">Mi semana</button>
+    <button role="tab" data-tab="alarmas" aria-selected="false">Alarmas</button>
+    <button role="tab" data-tab="horario" aria-selected="false">Mi horario</button>
     <button role="tab" data-tab="mes" aria-selected="false">Semanas en casa</button>
     <button role="tab" data-tab="tareas" aria-selected="false">Tareas flexibles</button>
     <button role="tab" data-tab="ajustes" aria-selected="false">Ajustes</button>
@@ -223,7 +242,7 @@ function avgSalida(wd){
   return v.length?Math.round(v.reduce((a,b)=>a+b,0)/v.length):null;
 }
 function dayEase(wd){
-  const unis=(FIXED[wd]||[]).filter(b=>b.k==="uni"&&b.s);
+  const unis=fijo(wd).filter(b=>b.k==="uni"&&b.s);
   if(!unis.length) return {lvl:"sin",t:"Sin clases"};
   const first=Math.min(...unis.map(b=>toM(b.s)));
   const need=first-S.cfg.travel-S.cfg.margin;
@@ -241,14 +260,14 @@ function setDay(date,patch){ S.days[date]=Object.assign({},dayRec(date),patch); 
 function fixedFor(date){
   const wd=pd(date).getDay(), c=S.cfg;
   const out=[];
-  for(const b of (FIXED[wd]||[])){
+  for(const b of fijo(wd)){
     if(b.id==="lideresMar"){
       const o={pendiente:{s:"21:00",e:"22:00",conf:true},despues:{s:"21:30",e:"22:30"},virtual:{s:"21:00",e:"22:00",v:1},no:null}[c.lideresMar];
       if(o) out.push(Object.assign({},b,o,{l:b.l+(c.lideresMar==="virtual"?" (virtual)":"")}));
       continue;
     }
     if(b.id==="ensayo"){ out.push(Object.assign({},b,{s:c.ensayo,e:"21:00"})); continue; }
-    out.push(Object.assign({},b));
+    out.push(Object.assign({},b, b.k==="extra"&&!b.place?{place:b.v?"casa":"fuera"}:{}));
   }
   for(const x of (dayRec(date).extra||[])) out.push({s:x.s,e:x.e,l:x.l,k:"extra",place:x.p});
   return out;
@@ -313,7 +332,7 @@ function computeDay(date){
     const tr = (b.k==="igl"&&!b.v)||(b.k==="extra"&&b.place==="fuera");
     if(tr&&!b.noTravelBefore) blocks.push({s:b.s-ct,e:b.s,l:"Traslado",k:"tras"});
     if(b.noTravelBefore) blocks.push({s:toM("15:50"),e:b.s,l:"Salir de casa a la iglesia",k:"tras"});
-    blocks.push({s:b.s,e:b.e,l:b.l,k:b.k,where:b.where,conf:b.conf});
+    blocks.push({s:b.s,e:b.e,l:b.l,k:b.k,where:b.where,conf:b.conf,v:b.v,place:b.place});
   }
   // traslado de regreso tras último compromiso presencial
   const pres=fx.filter(b=>(b.k==="igl"&&!b.v)||(b.k==="extra"&&b.place==="fuera"));
@@ -573,7 +592,7 @@ function renderMes(){
     </div>
     <section class="panel stack"><h3>Qué días conviene estudiar desde casa</h3>
       <div class="tbl"><table><thead><tr><th>Día</th><th>Primera clase</th><th>Salir del negocio a más tardar</th><th>Tu salida habitual</th><th>Lectura</th></tr></thead><tbody>
-      ${[1,2,3,4,5].map(wd=>{const e=dayEase(wd);const u=(FIXED[wd]||[]).filter(b=>b.k==="uni");const f=Math.min(...u.map(b=>toM(b.s)));const av=avgSalida(wd);
+      ${[1,2,3,4,5].map(wd=>{const e=dayEase(wd);const u=fijo(wd).filter(b=>b.k==="uni");const f=Math.min(...u.map(b=>toM(b.s)));const av=avgSalida(wd);
         return `<tr><td>${DN[wd]}</td><td>${fmt(f)}</td><td>${fmt(e.need)}</td><td>${av!=null?fmt(av):'<span class="muted">sin registros</span>'}</td><td><span class="pill ${e.lvl==="facil"?"p-ok":e.lvl==="medio"?"p-warn":"p-bad"}">${e.t}</span></td></tr>`;}).join("")}
       </tbody></table></div>
       <p class="note">«Tu salida habitual» se calcula con lo que registras cada día. Con unas semanas de registros, esta tabla te dirá con datos reales qué días son viables.</p>
@@ -690,61 +709,235 @@ function resumenDia(date,saludo){
   return t+(saludo?"Tú puedes. Lo importante primero, y sin apurarte.":"");
 }
 
-/* ---------- alarmas reales en el celular ---------- */
-function alarmasDe(date){
-  const d=computeDay(date), al=S.cfg.al, out=[]; const plan=planWeek(monday(date)); const di=(d.wd+6)%7;
-  const base=pd(date); const at=m=>{ const x=new Date(base); x.setHours(0,m,0,0); return x; };
-  out.push({at:at(d.wake),t:"Buenos días ⏰",b:"Hora de levantarte y tu devocional breve.",habla:resumenDia(date,true)});
-  out.push({at:at(toM("07:23")-0),t:"Salir al negocio",b:d.from==="negocio"?"Hoy estudias desde el negocio: lleva laptop, cargador y audífonos.":"Sales ahora para llegar a las 7:30 a. m."});
-  if(d.negFin<d.salida && d.wd!==0) out.push({at:at(d.negFin-10),t:"Prepárate para regresar a casa",b:`En 10 minutos sales del negocio para llegar a tu clase.`});
-  for(const b of d.blocks){
-    if(b.k==="uni") out.push({at:at(b.s-al.uni),t:`Clase a las ${fmt(b.s)}`,b:b.where==="negocio"?"Te conectas desde el negocio. Revisa audífonos e internet.":b.where==="?"?"Aún no decides desde dónde te conectas.":"Te conectas desde casa."});
-    else if(b.k==="igl"||b.k==="extra"){ const viaje=b.l.includes("virtual")||b.place==="casa"?0:S.cfg.churchTravel; out.push({at:at(b.s-viaje-al.igl),t:b.l,b:viaje?`Empieza a las ${fmt(b.s)}. Sal en ${al.igl} minutos con tus materiales.`:`Empieza a las ${fmt(b.s)}.`}); }
-    else if(b.k==="casa"&&/Cocinar/.test(b.l)) out.push({at:at(b.s-al.casa),t:"Cocinar el almuerzo",b:`Empieza a las ${fmt(b.s)}.`});
-    else if(b.k==="tras"&&/iglesia/.test(b.l)) out.push({at:at(b.s),t:"Salir a la iglesia",b:"Sales ahora para llegar a las 4:00 p. m."});
-  }
-  for(const f of plan.placed[di]) out.push({at:at(f.s-al.flex),t:f.l,b:`Bloque flexible de ${f.e-f.s} minutos.`});
-  const prep=d.bed-30;
-  if(d.lastEnd+30>d.bed) out.push({at:at(d.lastEnd),t:"A descansar",b:"Noche corta: deja lo no urgente para mañana."});
-  else out.push({at:at(prep),t:"Prepárate para dormir",b:`Meta: dormir a ${say(d.bed)}. Deja listo lo de mañana.`,habla:resumenDia(addD(date,1),false)});
-  return out;
+/* ---------- alarmas reales en el celular (v3: voz, tono, vibración, editables) ---------- */
+const AV_CATS = {
+  despertar:   {n:"Despertar",              icon:"☀️", min:false},
+  salida:      {n:"Salir al negocio",       icon:"🚶", min:false},
+  clase:       {n:"Clases",                 icon:"🎓", min:true},
+  iglesia:     {n:"Iglesia y reuniones",    icon:"⛪", min:true},
+  cocina:      {n:"Cocinar",                icon:"🍲", min:true},
+  tarea:       {n:"Tareas flexibles",       icon:"📝", min:true},
+  dormir:      {n:"Prepararme para dormir", icon:"🌙", min:true},
+  recordatorio:{n:"Recordatorios de BELA",  icon:"🔔", min:false}
+};
+const AV_MODOS = {voz:"Voz de BELA", tono:"Tono de alarma", vibra:"Solo vibración", apagada:"Apagada"};
+const CH_VER = "v3";
+function avCfg(){
+  const al = S.cfg.al || {};
+  const def = {despertar:{modo:"voz"}, salida:{modo:"voz"}, clase:{modo:"voz",min:al.uni??15}, iglesia:{modo:"voz",min:al.igl??45},
+               cocina:{modo:"tono",min:al.casa??15}, tarea:{modo:"vibra",min:al.flex??0}, dormir:{modo:"voz",min:30}, recordatorio:{modo:"voz"}};
+  S.cfg.av = Object.assign(def, S.cfg.av||{});
+  for(const k in def) S.cfg.av[k] = Object.assign({}, def[k], S.cfg.av[k]);
+  return S.cfg.av;
 }
+avCfg();
+S.alOv = S.alOv || {};      // ediciones por alarma: {clave:{off:true} | {min:..}}
+S.snooze = S.snooze || [];  // alarmas pospuestas
+const canal = (cat, modo) => modo==="voz" ? `bela-voz-${cat}-${CH_VER}` : modo==="tono" ? `bela-tono-${CH_VER}` : `bela-vibra-${CH_VER}`;
+
+function alarmasDe(date){
+  const d=computeDay(date), av=avCfg(), out=[]; const plan=planWeek(monday(date)); const di=(d.wd+6)%7;
+  const add=(cat,m,t,b,habla)=>out.push({cat,m,t,b,habla,date,key:`${date}|${cat}|${t}`});
+  add("despertar", d.wake, "Buenos días ⏰", "Hora de levantarte y tu devocional breve.", resumenDia(date,true));
+  if(d.wake < toM("07:23")) add("salida", toM("07:23"), "Salir al negocio", d.from==="negocio"?"Hoy estudias desde el negocio: lleva laptop, cargador y audífonos.":"Sales ahora para llegar a las 7:30 a. m.");
+  if(d.negFin<d.salida && d.wd!==0) add("salida", d.negFin-10, "Prepárate para regresar a casa", "En 10 minutos sales del negocio para llegar a tu clase.");
+  for(const b of d.blocks){
+    if(b.k==="uni") add("clase", b.s-(+av.clase.min||0), `Clase a las ${fmt(b.s)}`, b.where==="negocio"?"Te conectas desde el negocio. Revisa audífonos e internet.":b.where==="?"?"Aún no decides desde dónde te conectas.":"Te conectas desde casa.");
+    else if(b.k==="igl"||b.k==="extra"){ const viaje=(b.v||/virtual/i.test(b.l)||b.place==="casa")?0:S.cfg.churchTravel; add("iglesia", b.s-viaje-(+av.iglesia.min||0), b.l, viaje?`Empieza a las ${fmt(b.s)}. Sal en ${av.iglesia.min} minutos con tus materiales.`:`Empieza a las ${fmt(b.s)}.`); }
+    else if(b.k==="casa"&&/Cocinar/.test(b.l)) add("cocina", b.s-(+av.cocina.min||0), "Cocinar el almuerzo", `Empieza a las ${fmt(b.s)}.`);
+    else if(b.k==="tras"&&/iglesia/.test(b.l)) add("salida", b.s, "Salir a la iglesia", "Sales ahora para llegar a las 4:00 p. m.");
+  }
+  for(const f of plan.placed[di]) add("tarea", f.s-(+av.tarea.min||0), f.l, `Bloque flexible de ${f.e-f.s} minutos.`);
+  if(d.lastEnd+30>d.bed) add("dormir", d.lastEnd, "A descansar", "Noche corta: deja lo no urgente para mañana.");
+  else add("dormir", d.sleepStart-(+av.dormir.min||30), "Prepárate para dormir", `Meta: dormir a ${say(d.sleepStart)}. Deja listo lo de mañana.`, resumenDia(addD(date,1),false));
+  // ediciones del usuario
+  for(const a of out){ const ov=S.alOv[a.key]; a.off=!!(ov&&ov.off); a.editada=!!(ov&&ov.min!=null); if(a.editada) a.m=ov.min; a.at=new Date(pd(date)); a.at.setHours(0,a.m,0,0); }
+  return out.sort((x,y)=>x.m-y.m);
+}
+
 let alarmT=null, alarmEstado="";
 function programarAlarmas(){ clearTimeout(alarmT); alarmT=setTimeout(_programar,800); }
 async function _programar(){
-  if(!LN){ alarmEstado="Las alarmas funcionan en la app instalada en tu celular."; return pintarEstado(); }
+  if(!LN){ alarmEstado="Las alarmas funcionan en la app BELA instalada en tu celular."; return pintarEstado(); }
   try{
     const pend=await LN.getPending(); if(pend.notifications?.length) await LN.cancel({notifications:pend.notifications.map(n=>({id:n.id}))});
-    if(!S.cfg.alarmas){ alarmEstado="Alarmas desactivadas."; return pintarEstado(); }
-    const now=Date.now(); let id=1; const list=[];
-    for(let i=0;i<7;i++) for(const a of alarmasDe(addD(ds(new Date()),i))){
-      if(a.at.getTime()<=now+30000) continue;
-      list.push({id:id++,title:a.t,body:a.b,schedule:{at:a.at,allowWhileIdle:true},channelId:"mi-asistente",extra:{habla:a.habla||(a.t+". "+a.b)},smallIcon:"ic_stat_notify",iconColor:"#8E72C4"});
-    }
-    list.forEach(n=>{ delete n.smallIcon; }); list.sort((a,b)=>a.schedule.at-b.schedule.at); list.forEach((n,i)=>n.id=i+1);
+    if(!S.cfg.alarmas){ alarmEstado="Alarmas apagadas."; return pintarEstado(); }
+    const av=avCfg(), now=Date.now(), list=[];
+    const push=(a,cat)=>{ const modo=av[cat].modo; if(modo==="apagada"||a.off) return; if(a.at.getTime()<=now+20000) return;
+      list.push({title:a.t,body:a.b,schedule:{at:a.at,allowWhileIdle:true},channelId:canal(cat,modo),actionTypeId:"bela-alarma",autoCancel:true,
+                 extra:{habla:a.habla||(a.t+". "+a.b),cat,key:a.key||""}}); };
+    for(let i=0;i<7;i++) for(const a of alarmasDe(addD(ds(new Date()),i))) push(a,a.cat);
+    S.recs = (S.recs||[]).filter(r=>new Date(r.at).getTime()>now-3600e3);
+    for(const r of S.recs){ if(r.off) continue; push({t:"BELA te recuerda",b:r.texto,habla:`${nombre()}, te recuerdo: ${r.texto}.`,at:new Date(r.at),key:"rec|"+r.id},"recordatorio"); }
+    S.snooze = S.snooze.filter(z=>new Date(z.at).getTime()>now);
+    for(const z of S.snooze) push({t:z.t,b:z.b,habla:z.habla,at:new Date(z.at),key:z.key},z.cat in av?z.cat:"recordatorio");
+    list.sort((a,b)=>a.schedule.at-b.schedule.at); list.forEach((n,i)=>n.id=i+1);
     for(let i=0;i<list.length;i+=60) await LN.schedule({notifications:list.slice(i,i+60)});
-    const prox=list[0]; alarmEstado=`${list.length} alarmas programadas para los próximos 7 días.${prox?" La próxima: «"+prox.title+"» a las "+fmt(prox.schedule.at.getHours()*60+prox.schedule.at.getMinutes())+".":""}`;
-  }catch(e){ alarmEstado="No se pudieron programar las alarmas: "+(e.message||e); }
+    const prox=list[0];
+    alarmEstado=`✓ ${list.length} alarmas programadas para los próximos 7 días.${prox?" La próxima: «"+prox.title+"» "+(ds(prox.schedule.at)===ds(new Date())?"hoy":nice(ds(prox.schedule.at)).toLowerCase())+" a las "+fmt(prox.schedule.at.getHours()*60+prox.schedule.at.getMinutes())+".":""}`;
+  }catch(e){ alarmEstado="No se pudieron programar las alarmas: "+(e.message||e)+". Toca «Activar alarmas» otra vez."; }
   pintarEstado();
 }
-function pintarEstado(){ const el=document.getElementById("asEstado"); if(el) el.textContent=alarmEstado; }
+function pintarEstado(){ document.querySelectorAll(".asEstado").forEach(el=>el.textContent=alarmEstado); }
+
+async function crearCanales(){
+  if(!LN) return;
+  const base={importance:5,visibility:1,vibration:true,lights:true,lightColor:"#B48CFF"};
+  const tareas=[];
+  for(const [cat,c] of Object.entries(AV_CATS)) tareas.push(LN.createChannel(Object.assign({},base,{id:`bela-voz-${cat}-${CH_VER}`,name:`BELA · ${c.n} (voz)`,description:"Aviso con la voz de BELA",sound:`voz_${cat}.wav`})));
+  tareas.push(LN.createChannel(Object.assign({},base,{id:`bela-tono-${CH_VER}`,name:"BELA · Tono de alarma",description:"Aviso con tono de alarma",sound:"alarma.wav"})));
+  tareas.push(LN.createChannel(Object.assign({},base,{id:`bela-vibra-${CH_VER}`,name:"BELA · Solo vibración",description:"Aviso sin sonido",importance:4,sound:"silencio.wav"})));
+  await Promise.all(tareas.map(p=>p.catch(()=>{})));
+  try{ await LN.deleteChannel({id:"mi-asistente"}); }catch(e){}
+  try{ await LN.registerActionTypes({types:[{id:"bela-alarma",actions:[{id:"posponer",title:"Posponer 10 min"},{id:"escuchar",title:"Escuchar a BELA"}]}]}); }catch(e){}
+}
 async function activarAlarmas(){
-  if(!LN){ alarmEstado="Instala la app en tu celular para usar alarmas."; return pintarEstado(); }
+  if(!LN){ alarmEstado="Instala la app BELA en tu celular para usar alarmas."; return pintarEstado(); }
   try{
     let p=await LN.checkPermissions(); if(p.display!=="granted") p=await LN.requestPermissions();
-    if(p.display!=="granted"){ alarmEstado="Sin permiso de notificaciones. Actívalo en Ajustes del celular → Apps → Mi Asistente → Notificaciones."; return pintarEstado(); }
-    await LN.createChannel({id:"mi-asistente",name:"Alarmas de Mi Asistente",description:"Clases, iglesia, salidas y descanso",importance:5,visibility:1,vibration:true,lights:true,lightColor:"#8E72C4"});
+    if(p.display!=="granted"){ alarmEstado="Sin permiso de notificaciones. Actívalo en Ajustes del celular → Apps → BELA → Notificaciones."; return pintarEstado(); }
+    await crearCanales();
     if(LN.checkExactNotificationSetting){ const ex=await LN.checkExactNotificationSetting(); if(ex.exact_alarm!=="granted"&&LN.changeExactNotificationSetting) await LN.changeExactNotificationSetting(); }
-    S.cfg.alarmas=true; save(); _programar();
+    S.cfg.alarmas=true; save(); await _programar();
   }catch(e){ alarmEstado="Error al activar: "+(e.message||e); pintarEstado(); }
 }
-if(LN){
-  LN.addListener("localNotificationActionPerformed",ev=>{ const h=ev?.notification?.extra?.habla; if(h) setTimeout(()=>hablar(h),400); });
-  LN.addListener("localNotificationReceived",n=>{ const h=n?.extra?.habla; if(h) hablar(h); });
-  LN.checkPermissions().then(p=>{ if(p.display==="granted"){ LN.createChannel({id:"mi-asistente",name:"Alarmas de Mi Asistente",importance:5,visibility:1,vibration:true}).catch(()=>{}); programarAlarmas(); } }).catch(()=>{});
+async function probarAlarma(cat){
+  if(!LN){ alarmEstado="La prueba funciona en la app instalada."; return pintarEstado(); }
+  await activarAlarmas();
+  const modo=avCfg()[cat].modo==="apagada"?"tono":avCfg()[cat].modo;
+  const at=new Date(Date.now()+10000);
+  await LN.schedule({notifications:[{id:9999,title:`Prueba: ${AV_CATS[cat].n}`,body:`Así suena el modo «${AV_MODOS[modo]}». Toca para escuchar a BELA.`,schedule:{at,allowWhileIdle:true},channelId:canal(cat,modo),actionTypeId:"bela-alarma",extra:{habla:`Hola ${nombre()}, esta es una prueba de tus avisos de ${AV_CATS[cat].n.toLowerCase()}.`,cat}}]});
+  alarmEstado=`Prueba programada: sonará en 10 segundos (${AV_MODOS[modo]}). Puedes bloquear la pantalla.`; pintarEstado();
 }
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ render(); programarAlarmas(); } });
+function posponer(n, minutos){
+  const at=new Date(Date.now()+minutos*60000);
+  S.snooze.push({at:at.toISOString(),t:n.title||"BELA te recuerda",b:n.body||"",habla:n.extra?.habla||"",cat:n.extra?.cat||"recordatorio",key:"snooze|"+uid()});
+  save(); return at;
+}
+if(LN){
+  LN.addListener("localNotificationActionPerformed",ev=>{
+    const n=ev?.notification||{}, cat=n.extra?.cat, h=n.extra?.habla;
+    if(ev?.actionId==="posponer"){ const at=posponer(n,10); setTimeout(()=>hablar(`Listo, te vuelvo a avisar a ${say(at.getHours()*60+at.getMinutes())}.`),500); return; }
+    if(h && S.cfg.voz) setTimeout(()=>hablar(h),500);
+  });
+  LN.addListener("localNotificationReceived",n=>{
+    const cat=n?.extra?.cat, h=n?.extra?.habla, modo=cat&&avCfg()[cat]?avCfg()[cat].modo:"voz";
+    if(h && S.cfg.voz && modo==="voz") setTimeout(()=>hablar(h),3500);
+  });
+  LN.checkPermissions().then(async p=>{ if(p.display==="granted"){ await crearCanales(); programarAlarmas(); } }).catch(()=>{});
+}
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ if(!document.activeElement||!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) render(); programarAlarmas(); } });
 const _save=save; save=function(){ _save(); programarAlarmas(); };
+
+/* ---------- pestaña Alarmas ---------- */
+let alDia = 0;
+function renderAlarmas(){
+  const av=avCfg(), c=S.cfg, fecha=addD(ds(new Date()),alDia), ahora=Date.now();
+  const lista=alarmasDe(fecha).filter(a=>alDia>0||a.at.getTime()>ahora-60000);
+  const recs=(S.recs||[]).slice().sort((a,b)=>new Date(a.at)-new Date(b.at));
+  const dt=iso=>{ const d=new Date(iso); return ds(d)+"T"+pad(d.getHours())+":"+pad(d.getMinutes()); };
+  view.innerHTML=`<div class="grid2">
+   <section class="panel stack">
+     <h2>Mis alarmas</h2>
+     <div class="row"><button class="btn" id="alAct">${NATIVE?"Activar alarmas":"Solo en la app del celular"}</button>
+       <label class="check"><input type="checkbox" id="alOn" ${c.alarmas?"checked":""}> Alarmas encendidas</label></div>
+     <p class="note asEstado">${esc(alarmEstado)}</p>
+     <h3>¿Cómo quieres cada aviso?</h3>
+     <div class="avlist">${Object.entries(AV_CATS).map(([k,v])=>`
+       <div class="avrow">
+         <span class="avn">${v.icon} ${v.n}</span>
+         <select id="avm-${k}" data-avm="${k}" aria-label="Modo de ${v.n}">${Object.entries(AV_MODOS).map(([m,t])=>`<option value="${m}" ${av[k].modo===m?"selected":""}>${t}</option>`).join("")}</select>
+         ${v.min?`<label class="avmin">avisar <input type="number" id="avn-${k}" data-avn="${k}" min="0" max="180" step="5" value="${av[k].min}"> min antes</label>`:`<span class="avmin muted">a la hora exacta</span>`}
+         <button class="btn ghost sm" data-test="${k}">Probar</button>
+       </div>`).join("")}</div>
+     <p class="note"><b>Voz de BELA:</b> suena un timbre y BELA te dice el aviso. <b>Si tu celular está en silencio o en vibración, Android lo silencia solo</b> y solo vibra; con volumen, te habla. Al tocar la notificación, BELA te lee el detalle completo. Cada aviso trae el botón <b>Posponer 10 min</b>.</p>
+     <label class="check"><input type="checkbox" id="alVoz" ${c.voz?"checked":""}> Leer el detalle en voz alta cuando la app está abierta</label>
+   </section>
+   <section class="panel stack">
+     <div class="row" style="justify-content:space-between"><h2>Editar alarmas</h2>
+       <div class="seg" role="group" aria-label="Día">${["Hoy","Mañana","Pasado"].map((t,i)=>`<button data-ald="${i}" aria-pressed="${alDia===i}">${t}</button>`).join("")}</div></div>
+     <p class="note">${nice(fecha)}. Cambia la hora de cualquier aviso o desactívalo solo para ese día.</p>
+     <ul class="allist">${lista.length?lista.map((a,i)=>`
+       <li class="${a.off||av[a.cat].modo==="apagada"?"off":""}">
+         <input type="time" id="alt-${i}" data-alt="${esc(a.key)}" value="${toS(((a.m%1440)+1440)%1440)}" aria-label="Hora de ${esc(a.t)}">
+         <span class="alt"><b>${esc(limpio(a.t))}</b><small>${AV_CATS[a.cat].icon} ${AV_MODOS[av[a.cat].modo]}${a.editada?" · editada":""}</small></span>
+         <button class="btn ghost sm" data-aloff="${esc(a.key)}">${a.off?"Activar":"No avisar"}</button>
+         ${a.editada||a.off?`<button class="btn ghost sm" data-alres="${esc(a.key)}">Restaurar</button>`:""}
+       </li>`).join(""):`<li class="muted">No quedan alarmas para este día.</li>`}</ul>
+     <h3>Recordatorios que le pediste a BELA</h3>
+     <ul class="allist">${recs.length?recs.map(r=>`
+       <li class="${r.off?"off":""}">
+         <input type="datetime-local" id="rdt-${r.id}" data-rdt="${r.id}" value="${dt(r.at)}" aria-label="Fecha y hora">
+         <input type="text" id="rtx-${r.id}" data-rtx="${r.id}" value="${esc(r.texto)}" aria-label="Texto del recordatorio" class="grow">
+         <button class="btn ghost sm" data-roff="${r.id}">${r.off?"Activar":"Pausar"}</button>
+         <button class="btn ghost sm" data-rdel="${r.id}">Borrar</button>
+       </li>`).join(""):`<li class="muted">Aún no hay recordatorios. Dile a BELA: «recuérdame llamar a una señorita a las cinco».</li>`}</ul>
+     <form id="rNew" class="row ask"><input type="text" id="rNewTx" placeholder="Nuevo recordatorio" class="grow" aria-label="Nuevo recordatorio"><input type="datetime-local" id="rNewAt" aria-label="Fecha y hora"><button class="btn sm" type="submit">Agregar</button></form>
+     <p class="note" id="rMsg"></p>
+   </section></div>`;
+  const $=id=>document.getElementById(id);
+  $("alAct").onclick=activarAlarmas;
+  $("alOn").onchange=e=>{ c.alarmas=e.target.checked; save(); };
+  $("alVoz").onchange=e=>{ c.voz=e.target.checked; save(); };
+  view.querySelectorAll("[data-avm]").forEach(el=>el.onchange=()=>{ av[el.dataset.avm].modo=el.value; save(); render(); });
+  view.querySelectorAll("[data-avn]").forEach(el=>el.onchange=()=>{ av[el.dataset.avn].min=Math.max(0,Math.min(180,+el.value||0)); save(); render(); });
+  view.querySelectorAll("[data-test]").forEach(b=>b.onclick=()=>probarAlarma(b.dataset.test));
+  view.querySelectorAll("[data-ald]").forEach(b=>b.onclick=()=>{ alDia=+b.dataset.ald; render(); });
+  view.querySelectorAll("[data-alt]").forEach(el=>el.onchange=()=>{ if(!el.value) return; S.alOv[el.dataset.alt]=Object.assign({},S.alOv[el.dataset.alt],{min:toM(el.value)}); save(); render(); });
+  view.querySelectorAll("[data-aloff]").forEach(b=>b.onclick=()=>{ const k=b.dataset.aloff, o=Object.assign({},S.alOv[k]); o.off=!o.off; S.alOv[k]=o; save(); render(); });
+  view.querySelectorAll("[data-alres]").forEach(b=>b.onclick=()=>{ delete S.alOv[b.dataset.alres]; save(); render(); });
+  const rec=id=>S.recs.find(r=>r.id===id);
+  view.querySelectorAll("[data-rdt]").forEach(el=>el.onchange=()=>{ if(el.value){ rec(el.dataset.rdt).at=new Date(el.value).toISOString(); save(); render(); } });
+  view.querySelectorAll("[data-rtx]").forEach(el=>el.onchange=()=>{ const v=el.value.trim(); if(v){ rec(el.dataset.rtx).texto=v; save(); } });
+  view.querySelectorAll("[data-roff]").forEach(b=>b.onclick=()=>{ const r=rec(b.dataset.roff); r.off=!r.off; save(); render(); });
+  view.querySelectorAll("[data-rdel]").forEach(b=>b.onclick=()=>{ S.recs=S.recs.filter(r=>r.id!==b.dataset.rdel); save(); render(); });
+  $("rNew").onsubmit=e=>{ e.preventDefault(); const tx=$("rNewTx").value.trim(), at=$("rNewAt").value;
+    if(!tx||!at){ $("rMsg").textContent="Escribe el recordatorio y elige fecha y hora."; return; }
+    if(new Date(at).getTime()<Date.now()){ $("rMsg").textContent="Esa hora ya pasó. Elige una hora futura."; return; }
+    S.recs.push({id:uid(),at:new Date(at).toISOString(),texto:tx}); save(); render(); };
+}
+
+/* ---------- pestaña Mi horario (editar horario fijo) ---------- */
+function fijo(wd){ return (S.fixed&&S.fixed[wd])||FIXED[wd]||[]; }
+let hDia = (new Date().getDay());
+const TIPOS = {uni:"Universidad", igl:"Iglesia", casa:"Casa", extra:"Otro compromiso"};
+function renderHorario(){
+  const lista=fijo(hDia), editado=!!(S.fixed&&S.fixed[hDia]);
+  view.innerHTML=`<section class="panel stack">
+    <h2>Mi horario fijo</h2>
+    <p class="note">Edita tus clases, servicios y compromisos de cada semana. Los cambios se aplican a todas las semanas y BELA reorganiza tus tareas y alarmas sola.</p>
+    <div class="chips" role="group" aria-label="Día de la semana">${[1,2,3,4,5,6,0].map(d=>`<button class="chip" data-hd2="${d}" aria-pressed="${hDia===d}">${DN[d].slice(0,3)}</button>`).join("")}</div>
+    <div class="hlist">
+    ${lista.map((b,i)=>b.id?`<div class="hcard"><div class="row" style="justify-content:space-between"><b>${esc(b.l)}</b><button class="btn ghost sm" data-hdel="${i}">Quitar</button></div><span class="note">La hora se elige en Ajustes.</span></div>`:`
+      <div class="hcard">
+        <input type="text" id="hl-${i}" data-hf="l" data-i="${i}" value="${esc(b.l)}" aria-label="Actividad">
+        <div class="row">
+          <label class="f">Inicio<input type="time" id="hs-${i}" data-hf="s" data-i="${i}" value="${b.s||""}"></label>
+          <label class="f">Fin<input type="time" id="he-${i}" data-hf="e" data-i="${i}" value="${b.e||""}"></label>
+          <label class="f">Tipo<select id="hk-${i}" data-hf="k" data-i="${i}">${Object.entries(TIPOS).map(([k,t])=>`<option value="${k}" ${b.k===k?"selected":""}>${t}</option>`).join("")}</select></label>
+        </div>
+        <div class="row" style="justify-content:space-between">
+          <label class="check"><input type="checkbox" id="hv-${i}" data-hf="v" data-i="${i}" ${b.v?"checked":""}> Virtual (desde casa)</label>
+          <button class="btn ghost sm" data-hdel="${i}">Quitar</button>
+        </div>
+      </div>`).join("")}
+    </div>
+    <div class="row"><button class="btn" id="hAdd">Agregar actividad</button>${editado?`<button class="btn ghost" id="hRes">Restaurar ${DN[hDia].toLowerCase()} original</button>`:""}</div>
+    <p class="note" id="hMsg">Marca «Virtual» si es desde casa: así BELA no te suma tiempo de traslado.</p>
+  </section>`;
+  const editar=fn=>{ S.fixed=S.fixed||{}; const l=JSON.parse(JSON.stringify(fijo(hDia))); fn(l); S.fixed[hDia]=l; save(); };
+  view.querySelectorAll("[data-hd2]").forEach(b=>b.onclick=()=>{ hDia=+b.dataset.hd2; render(); });
+  view.querySelectorAll("[data-hf]").forEach(el=>el.onchange=()=>{
+    const i=+el.dataset.i, f=el.dataset.hf, v=f==="v"?(el.checked?1:0):el.value;
+    if((f==="s"||f==="e")&&!v) return;
+    editar(l=>{ l[i][f]=v; if(l[i].s&&l[i].e&&toM(l[i].e)<=toM(l[i].s)) l[i].e=toS(Math.min(toM(l[i].s)+60,1439)); });
+    if(f!=="l") render();
+  });
+  view.querySelectorAll("[data-hdel]").forEach(b=>b.onclick=()=>{ editar(l=>l.splice(+b.dataset.hdel,1)); render(); });
+  document.getElementById("hAdd").onclick=()=>{ editar(l=>l.push({s:"16:00",e:"17:00",l:"Nueva actividad",k:"extra"})); render(); };
+  const r=document.getElementById("hRes"); if(r) r.onclick=()=>{ delete S.fixed[hDia]; save(); render(); };
+}
+
 
 
 /* ================= BELA: escucha, entiende y responde ================= */
@@ -800,7 +993,7 @@ function responder(entrada){
   }
 
   // Registrar regreso de mamá
-  if(/mama|mami/.test(t) && /(regres|lleg|vino|volvi|esta aqui|ya esta)/.test(t)){
+  if(/\bmam(a|i)\b( ya)? (regreso|llego|volvio|vino|regresa|llega|esta aqui|ya esta|ya llego|ya regreso)/.test(t)){
     const h = parseHora(t, "mama") || (/(ya|ahora|recien)/.test(t) ? {min: ahora} : null);
     if(!h) return "¿A qué hora regresó tu mamá? Dime, por ejemplo: mi mamá regresó a las diez y media.";
     setDay(hoy, {mom: toS(h.min)});
@@ -838,7 +1031,7 @@ function responder(entrada){
   const cuando = f => f===hoy?"hoy":f===addD(hoy,1)?"mañana":"el "+nice(f).toLowerCase();
 
   // Hora de dormir: "hoy dormiré a las 11", "me voy a acostar a las 10 y media"
-  if(/(dormir|dormire|acostar|acostare|acuesto|me duermo|a la cama)/.test(t) && !/cuantas horas|horas voy|a que hora debo|que hora debo/.test(t)){
+  if(/\b(dormire|me dormire|me acostare|me voy a (dormir|acostar)|voy a dormir|me duermo|me acuesto|me ire a (dormir|la cama)|dormir a (las|la)|acostarme a (las|la))\b/.test(t) && !/cuantas horas|horas voy|a que hora debo|que hora debo|por que|como puedo|consejo/.test(t)){
     const h = parseHora(t, "noche");
     if(h){
       let m = h.min; if(m < 6*60) m += 1440;          // después de medianoche
@@ -861,7 +1054,7 @@ function responder(entrada){
     return `Para dormir ${S.cfg.goal} horas y levantarte a ${say(d.nextWake)}, acuéstate a ${say(d.bedAuto)}.${d.lastEnd+30>d.bedAuto?` Pero hoy terminas a ${say(d.lastEnd)}, así que lo más temprano posible es ${say(d.lastEnd+30)}.`:""} Empieza a prepararte a ${say(d.bedAuto-30)}.`;
   }
   // Hora de levantarse: "me levanté a las 7", "mañana me levanto a las 6"
-  if(/(me levante|me desperte|me levanto|me despierto|levantarme|despertarme)/.test(t)){
+  if(/\b(me levante|me desperte|me levanto|me despierto|me voy a levantar|me levantare|me despertare)\b/.test(t) || (/\b(levantarme|despertarme)\b/.test(t) && parseHora(t) && !/como|por que|consejo/.test(t))){
     const h = parseHora(t, "mama");
     if(!h) return "¿A qué hora te levantas? Dime, por ejemplo: mañana me levanto a las seis.";
     const f = /(me levante|me desperte)/.test(t) ? hoy : (/\bmanana\b/.test(t.replace(/de la manana/g,"")) ? addD(hoy,1) : (h.min > ahora ? hoy : addD(hoy,1)));
@@ -874,7 +1067,7 @@ function responder(entrada){
     return r;
   }
   // Reorganizar desde ahora
-  if(/(reorganiza|reacomoda|reprograma|replanifica|ordena de nuevo|vuelve a organizar|no termine|me atrase|se me hizo tarde)/.test(t)){
+  if(/\b(reorganiza|reacomoda|reprograma|replanifica)\b|\b(reorganizar|reacomodar|reprogramar|organiza de nuevo|ordena de nuevo|vuelve a organizar)( mi| el| la)? (dia|horario|agenda|semana|tarde)\b|\bse me hizo tarde\b|\bme atrase\b|\bno termine (mis|mi|las|la) (tareas?|pendientes|actividades)\b/.test(t)){
     const f = fechaDe(t);
     if(f===hoy) setDay(hoy, {desde: ahora+5});
     const items = bloquesDesde(f, f===hoy?ahora:0, 24*60).filter(b=>f!==hoy||b.s>=ahora);
@@ -887,12 +1080,12 @@ function responder(entrada){
   }
   // Tarea hecha / omitida
   const tarea = buscarTarea(t);
-  if(tarea && /(ya hice|ya termine|termine|hice|complete|listo con|ya acabe)/.test(t)){
+  if(tarea && /(^|\s)(ya )?(hice|termine|complete|acabe)\b/.test(t) && !/^(como|por que|que|cuando)\b/.test(t)){
     const f = fechaDe(t); setDay(f, {done:[...new Set([...(dayRec(f).done||[]),tarea.id])]});
     const p = planWeek(monday(f)); const quedan = p.placed.flat().filter(x=>x.id===tarea.id).length;
     return `¡Bien hecho, ${nombre()}! Marqué «${limpio(tarea.n)}» como hecha${quedan?`. Te quedan ${quedan} ${quedan===1?"vez":"veces"} esta semana`:". Ya cumpliste con esa tarea esta semana"}.`;
   }
-  if(tarea && /(no hare|no voy a|no puedo|cancela|quita|salta|omite|mueve|pasa|cambia|no podre)/.test(t)){
+  if(tarea && /\b(no hare|no voy a hacer|no voy a poder|no podre|no puedo hacer|cancela|quita|omite|salta|mueve)\b/.test(t) && !/^(como|por que|que pasa)\b/.test(t)){
     const f = fechaDe(t.replace(/\b(a|para) (el )?(manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/,""));
     setDay(f, {skip:[...new Set([...(dayRec(f).skip||[]),tarea.id])]});
     const p = planWeek(monday(f)); const nuevo = p.days.map((d,i)=>({d,x:p.placed[i].find(y=>y.id===tarea.id)})).find(o=>o.x && o.d.date>=f && o.d.date!==f);
@@ -902,7 +1095,7 @@ function responder(entrada){
   const ev = t.match(/(?:tengo|agrega|anota|programa|pon)\s+(?:una?\s+)?(reunion|cita|salida|ensayo|fiesta|evento|clase|actividad|examen|exposicion|culto|vigilia|cumpleanos|almuerzo|cena|encuentro)\b(.*)/);
   if(ev){
     const h = parseHora(ev[2]);
-    if(!h) return `¿A qué hora es la ${ev[1]}? Dímelo junto con el día, por ejemplo: tengo una ${ev[1]} el miércoles a las siete de la noche.`;
+    if(!h){ if(/^(agrega|anota|programa|pon)/.test(t)) return `¿A qué hora es la ${ev[1]}? Dímelo junto con el día, por ejemplo: anota una ${ev[1]} el miércoles a las siete de la noche.`; return null; }
     const f = fechaDe(ev[2]);
     const hasta = ev[2].match(/hasta (?:las |la )?(.+)/); const hf = hasta ? parseHora("a las "+hasta[1]) : null;
     const fin = hf && hf.min>h.min ? hf.min : h.min+60;
@@ -923,8 +1116,8 @@ function responder(entrada){
     return `Anotado: hoy estudias desde ${lugar==="casa"?"casa":"el negocio"}.${lugar==="negocio"?" Lleva tu laptop, cargador y audífonos.":""}${bad.length?" Ojo: "+bad[0].t:" Todo encaja sin choques."}`;
   }
 
-  if(/(organiza|planifica|que hago|que me toca).*(tarde)/.test(t)) return resumenTramo(hoy, Math.max(ahora, 12*60), 19*60, "esta tarde");
-  if(/(organiza|planifica|que hago|que me toca).*(noche)/.test(t)) return resumenTramo(hoy, Math.max(ahora, 19*60), 24*60, "esta noche");
+  if(/^(organiza|planifica|que hago|que me toca)( mi| la| en la| esta)? tarde$/.test(t)) return resumenTramo(hoy, Math.max(ahora, 12*60), 19*60, "esta tarde");
+  if(/^(organiza|planifica|que hago|que me toca)( mi| la| en la| esta)? noche$/.test(t)) return resumenTramo(hoy, Math.max(ahora, 19*60), 24*60, "esta noche");
   if(/^(que sigue|que me toca ahora|que hago ahora|que viene|lo siguiente|cual es mi proxima actividad|que es lo siguiente)$/.test(t)){
     const b = bloquesDesde(hoy, ahora, 24*60).find(x=>x.s>=ahora);
     return b ? `Lo siguiente: ${limpio(b.l)} a ${say(b.s)}${b.where==="negocio"?", desde el negocio":""}.` : "No tienes más compromisos por hoy. Toca descansar.";
@@ -974,7 +1167,7 @@ function saludo(){
 }
 
 /* orbe animado */
-function orbe(estado){ const o=document.getElementById("orb"); if(o){ o.dataset.st=estado||""; } const s=document.getElementById("orbSt"); if(s) s.textContent = estado==="habla"?"BELA · HABLANDO":estado==="escucha"?"BELA · ESCUCHANDO":"BELA · EN LÍNEA"; }
+function orbe(estado){ const o=document.getElementById("orb"); if(o){ o.dataset.st=estado||""; } const s=document.getElementById("orbSt"); if(s) s.textContent = estado==="habla"?"BELA · HABLANDO":estado==="escucha"?"BELA · ESCUCHANDO":estado==="piensa"?"BELA · PENSANDO…":"BELA · EN LÍNEA"; }
 
 hablar = async function(texto){
   const out=document.getElementById("asTexto"); if(out) out.textContent=texto;
@@ -1027,16 +1220,6 @@ async function escuchar(){
   }catch(e){ orbe(""); st.textContent="No te escuché bien. Inténtalo de nuevo o escríbeme abajo."; }
 }
 
-/* recordatorios propios dentro de las alarmas */
-const _prog0 = _programar;
-_programar = async function(){
-  await _prog0();
-  if(!LN || !S.cfg.alarmas) return;
-  const now = Date.now();
-  S.recs = S.recs.filter(r => new Date(r.at).getTime() > now - 3600e3);
-  const list = S.recs.filter(r=>new Date(r.at).getTime()>now+30000).map((r,i)=>({id:5000+i,title:"BELA te recuerda",body:r.texto,schedule:{at:new Date(r.at),allowWhileIdle:true},channelId:"mi-asistente",extra:{habla:`${nombre()}, te recuerdo: ${r.texto}.`}}));
-  try{ if(list.length) await LN.schedule({notifications:list}); }catch(e){}
-};
 
 /* saludo al abrir la app (una vez al día) */
 setTimeout(()=>{ const hoy=ds(new Date()); if(NATIVE && S.cfg.voz && S.lastGreet!==hoy){ S.lastGreet=hoy; try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){} hablar(saludo()); } }, 1200);
@@ -1057,17 +1240,9 @@ function renderAsistente(){
      <div class="log" id="belaLog"></div>
    </section>
    <section class="panel stack">
-     <h2>Alarmas</h2>
-     <p class="note">Suenan aunque la app esté cerrada. Al tocar una alarma, BELA te la lee. Se reprograman solas cuando registras la hora de regreso de tu mamá o le pides un recordatorio.</p>
-     <div class="row"><button class="btn" id="asAct">${NATIVE?"Activar y programar alarmas":"Solo en la app del celular"}</button>
-       <label class="check"><input type="checkbox" id="asOn" ${c.alarmas?"checked":""}> Alarmas encendidas</label></div>
-     <p class="note" id="asEstado">${esc(alarmEstado)}</p>
-     <div class="row">
-       <label class="f">Antes de clases (min)<input type="number" id="al-uni" min="0" value="${c.al.uni}"></label>
-       <label class="f">Antes de salir a la iglesia (min)<input type="number" id="al-igl" min="0" value="${c.al.igl}"></label>
-       <label class="f">Antes de cocinar (min)<input type="number" id="al-casa" min="0" value="${c.al.casa}"></label>
-     </div>
-     ${S.recs.length?`<h3>Recordatorios que le pediste a BELA</h3><ul class="alerts">${S.recs.map(r=>`<li class="a-ok">${esc(r.texto)} · ${nice(ds(new Date(r.at)))} ${fmt(new Date(r.at).getHours()*60+new Date(r.at).getMinutes())} <button class="btn ghost sm" data-delrec="${r.id}">Quitar</button></li>`).join("")}</ul>`:""}
+     <h2>Avisos y voz</h2>
+     <p class="note asEstado">${esc(alarmEstado)}</p>
+     <div class="row"><button class="btn" id="goAl">Editar mis alarmas</button><button class="btn ghost" id="goHo">Editar mi horario</button></div>
      <h3>Voz</h3>
      <div class="row">
        <label class="check"><input type="checkbox" id="asVoz" ${c.voz?"checked":""}> Que BELA me hable</label>
@@ -1079,101 +1254,183 @@ function renderAsistente(){
   const $=id=>document.getElementById(id);
   pintarLog();
   $("mic").onclick=escuchar;
+  $("goAl").onclick=()=>{ tab="alarmas"; render(); };
+  $("goHo").onclick=()=>{ tab="horario"; render(); };
   $("belaForm").onsubmit=e=>{ e.preventDefault(); const v=$("belaIn").value; $("belaIn").value=""; conversar(v); };
   view.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>conversar(b.dataset.q));
   view.querySelector("[data-callar]").onclick=()=>{ try{ TTS?TTS.stop():speechSynthesis.cancel(); }catch(e){} orbe(""); };
-  view.querySelectorAll("[data-delrec]").forEach(b=>b.onclick=()=>{ S.recs=S.recs.filter(r=>r.id!==b.dataset.delrec); save(); render(); });
-  $("asAct").onclick=activarAlarmas;
-  $("asOn").onchange=e=>{ c.alarmas=e.target.checked; save(); };
-  ["uni","igl","casa"].forEach(k=>$("al-"+k).onchange=e=>{ c.al[k]=Math.max(0,+e.target.value||0); save(); });
   $("asVoz").onchange=e=>{ c.voz=e.target.checked; save(); };
   $("asRate").onchange=e=>{ c.rate=+e.target.value; save(); };
   $("asNom").onchange=e=>{ c.nombre=e.target.value.trim(); save(); render(); };
   bindIA();
 }
 
-/* ================= BELA + IA (preguntas libres con Gemini) ================= */
+/* ================= BELA + IA (v3: conexión robusta con Gemini) ================= */
 const IA_LS = "bela-ia-clave";
-const IA_MODELOS = ["gemini-3.5-flash-lite","gemini-3.8-flash","gemini-2.5-flash"];
+const IA_MODELOS = ["gemini-3.5-flash-lite","gemini-3.8-flash","gemini-3.6-flash","gemini-2.5-flash","gemini-flash-latest"];
+const IA_URL = "https://generativelanguage.googleapis.com/v1beta/";
 let iaHist = [];
-const iaClave = () => { try{ return localStorage.getItem(IA_LS)||""; }catch(e){ return ""; } };
+S.iaDiag = S.iaDiag || {};
+const iaClave = () => { try{ return (localStorage.getItem(IA_LS)||"").trim(); }catch(e){ return ""; } };
 const iaGuardar = k => { try{ k?localStorage.setItem(IA_LS,k.trim()):localStorage.removeItem(IA_LS); }catch(e){} };
 const sinMarkdown = x => x.replace(/```[\s\S]*?```/g," ").replace(/[*_#>`]+/g,"").replace(/^\s*[-•]\s+/gm,"").replace(/\n{2,}/g,"\n").trim();
+const espera_ = ms => new Promise(r=>setTimeout(r,ms));
+const HTTP = plug("CapacitorHttp");
+
+/* Petición con conexión nativa del celular (más estable) y respaldo con fetch */
+async function iaHttp(metodo, ruta, cuerpo, clave, ms){
+  const url = IA_URL + ruta, headers = {"Content-Type":"application/json","x-goog-api-key":clave};
+  if(HTTP && HTTP.request){
+    let tm; const tiempo = new Promise((_,rej)=>{ tm=setTimeout(()=>rej(Object.assign(new Error("timeout"),{name:"Timeout"})), ms); });
+    tiempo.catch(()=>{});
+    try{
+      const r = await Promise.race([HTTP.request({url, method:metodo, headers, data:cuerpo, connectTimeout:ms, readTimeout:ms}), tiempo]);
+      clearTimeout(tm);
+      let data = r.data; if(typeof data==="string"){ try{ data=JSON.parse(data); }catch(e){ data={raw:data}; } }
+      return {status:r.status, data};
+    }catch(e){ clearTimeout(tm); if(e.name==="Timeout") throw e; /* si falla lo nativo, probamos fetch */ }
+  }
+  const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), ms);
+  try{
+    const res = await fetch(url, {method:metodo, headers, body:cuerpo?JSON.stringify(cuerpo):undefined, signal:ctl.signal});
+    const data = await res.json().catch(()=>({}));
+    return {status:res.status, data};
+  }catch(e){ if(e.name==="AbortError") throw Object.assign(new Error("timeout"),{name:"Timeout"}); throw e; }
+  finally{ clearTimeout(t); }
+}
 
 function contextoIA(){
   const hoy = ds(new Date()), ahora = new Date().getHours()*60+new Date().getMinutes();
+  let dia="", man="";
+  try{ dia=resumenDia(hoy,false); man=resumenDia(addD(hoy,1),false); }catch(e){}
   return `Eres BELA, la asistente personal por voz de ${nombre()}, una estudiante universitaria de Ingeniería de Sistemas en Lima, Perú. Hablas en español peruano, con calidez, de forma clara y breve.
-Responde cualquier pregunta que te haga, de cualquier tema: estudios, Biblia, cocina, consejos, cultura general, tecnología, etc.
-Tus respuestas se leen en voz alta: usa 2 a 5 frases cortas, sin listas largas, sin símbolos, sin markdown, sin emojis. Si piden algo más largo, resume lo esencial y ofrece continuar.
+Responde cualquier pregunta que te haga, de cualquier tema: estudios, Biblia, cocina, consejos, cultura general, tecnología, matemática, redacción, etc.
+Tus respuestas se leen en voz alta: usa 2 a 6 frases cortas, sin listas largas, sin símbolos, sin markdown, sin emojis. Si piden algo largo (un resumen, un texto, una explicación detallada), da lo esencial y ofrece continuar.
 Si no sabes algo o puede haber cambiado, dilo con honestidad. Para temas de salud, legales o de dinero, da información general y sugiere consultar a un profesional.
-No inventes compromisos. Si te pide cambiar su horario, dile que use frases como «hoy dormiré a las once» o «reorganiza mi día», porque esas las hace la app directamente.
+No inventes compromisos. Si te pide cambiar su horario, dile que use frases como «hoy dormiré a las once», «reorganiza mi día» o que lo edite en la pestaña Mi horario.
 Ahora son ${say(ahora)} del ${nice(hoy).toLowerCase()}.
-Su día de hoy: ${resumenDia(hoy,false)}
-Mañana: ${resumenDia(addD(hoy,1),false)}`;
+Su día de hoy: ${dia}
+Mañana: ${man}`;
+}
+
+function iaError(status, data, e){
+  const msg = (data&&data.error&&data.error.message)||"";
+  S.iaDiag = {cuando:new Date().toLocaleString("es-PE"), status:status||0, msg:(msg||(e&&e.message)||"").slice(0,220)};
+}
+
+async function descubrirModelo(clave){
+  try{
+    const r = await iaHttp("GET","models?pageSize=100",null,clave,15000);
+    const ms = ((r.data&&r.data.models)||[]).filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")).map(m=>m.name.replace("models/",""));
+    return ms.find(m=>/flash-lite/.test(m)&&!/preview|image|tts|live|audio/.test(m)) || ms.find(m=>/flash/.test(m)&&!/preview|image|tts|live|audio/.test(m)) || ms[0] || null;
+  }catch(e){ return null; }
 }
 
 async function preguntarIA(pregunta){
   const clave = iaClave();
-  if(!clave) return `Para responder preguntas de cualquier tema necesito que me conectes a la inteligencia de Google. Ve abajo, a «Preguntas libres», y pega tu clave gratuita. Mientras tanto, ${ayudaTexto().charAt(0).toLowerCase()+ayudaTexto().slice(1)}`;
-  if(navigator.onLine === false) return "No tengo internet ahora. Las órdenes de tu horario sí funcionan sin conexión.";
+  if(!clave) return `Para responder preguntas de cualquier tema necesito que me conectes a la inteligencia de Google. Ve abajo, a «Preguntas libres», y pega tu clave gratuita.`;
+  if(navigator.onLine === false) return "No tengo internet ahora. Las órdenes de tu horario sí funcionan sin conexión. Vuelve a preguntarme cuando tengas señal.";
   const contents = [...iaHist, {role:"user", parts:[{text:pregunta}]}];
-  const body = JSON.stringify({systemInstruction:{parts:[{text:contextoIA()}]}, contents, generationConfig:{maxOutputTokens:600, temperature:0.7}});
-  const modelos = [S.cfg.iaModelo, ...IA_MODELOS].filter((m,i,a)=>m && a.indexOf(m)===i);
-  for(const m of modelos){
-    const ctl = new AbortController(); const to = setTimeout(()=>ctl.abort(), 30000);
-    try{
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json","x-goog-api-key":clave}, body, signal:ctl.signal});
-      clearTimeout(to);
-      if(res.status===404) continue;
-      if(res.status===429) return "Por ahora llegué al límite gratuito de preguntas. Inténtalo de nuevo en un minuto.";
-      if(res.status===400||res.status===401||res.status===403){ const e=await res.json().catch(()=>({})); const msg=(e.error&&e.error.message)||""; if(/api key|API_KEY|permission/i.test(msg)||res.status!==400) return "Tu clave de Google no funciona. Revisa que la copiaste completa en «Preguntas libres»."; continue; }
-      if(!res.ok) continue;
-      const data = await res.json();
-      const txt = sinMarkdown(((data.candidates||[])[0]?.content?.parts||[]).map(p=>p.text||"").join(""));
-      if(!txt) return "No supe qué responder a eso. ¿Me lo preguntas de otra forma?";
-      S.cfg.iaModelo = m;
-      iaHist.push({role:"user",parts:[{text:pregunta}]},{role:"model",parts:[{text:txt}]});
-      if(iaHist.length>12) iaHist = iaHist.slice(-12);
-      return txt;
-    }catch(e){ clearTimeout(to); if(e.name==="AbortError") return "Tardó demasiado la respuesta. Revisa tu internet e inténtalo otra vez."; }
+  const cuerpo = (pensar) => { const gc={maxOutputTokens:4096, temperature:0.7}; if(!pensar) gc.thinkingConfig={thinkingBudget:0};
+    return {systemInstruction:{parts:[{text:contextoIA()}]}, contents, generationConfig:gc}; };
+  let modelos = [S.cfg.iaModelo, ...IA_MODELOS].filter((m,i,a)=>m && a.indexOf(m)===i);
+  let descubierto = false, ultimo = "";
+  for(let mi=0; mi<modelos.length; mi++){
+    const m = modelos[mi];
+    let sinPensar = !(S.cfg.iaPensar||{})[m];
+    for(let intento=0; intento<3; intento++){
+      let r;
+      try{ r = await iaHttp("POST", `models/${m}:generateContent`, cuerpo(!sinPensar), clave, 40000); }
+      catch(e){ iaError(0,null,e); ultimo = e.name==="Timeout" ? "lento" : "red"; await espera_(1200*(intento+1)); continue; }
+      const st = r.status, data = r.data||{}, msg = (data.error&&data.error.message)||"";
+      if(st===200){
+        const cand = (data.candidates||[])[0];
+        const txt = sinMarkdown(((cand&&cand.content&&cand.content.parts)||[]).filter(p=>!p.thought).map(p=>p.text||"").join(""));
+        if(!txt){
+          if(data.promptFeedback&&data.promptFeedback.blockReason) return "Prefiero no responder eso. ¿Te ayudo con otra cosa?";
+          if(cand && cand.finishReason==="SAFETY") return "Prefiero no responder eso. ¿Te ayudo con otra cosa?";
+          iaError(st,{error:{message:"Respuesta vacía ("+(cand&&cand.finishReason)+")"}}); ultimo="vacia"; continue;
+        }
+        S.cfg.iaModelo = m; S.iaDiag = {ok:true, cuando:new Date().toLocaleString("es-PE"), modelo:m};
+        iaHist.push({role:"user",parts:[{text:pregunta}]},{role:"model",parts:[{text:txt}]});
+        if(iaHist.length>12) iaHist = iaHist.slice(-12);
+        try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+        return txt;
+      }
+      iaError(st,data);
+      if(st===400 && /thinking/i.test(msg) && sinPensar){ sinPensar=false; S.cfg.iaPensar=Object.assign({},S.cfg.iaPensar,{[m]:true}); continue; }
+      if(st===404 || (st===400 && /model|not found|not supported/i.test(msg))){
+        if(!descubierto){ descubierto=true; const d=await descubrirModelo(clave); if(d && !modelos.includes(d)) modelos.splice(mi+1,0,d); }
+        ultimo="modelo"; break;
+      }
+      if(st===401 || st===403 || (st===400 && /api.?key|credential|auth|token/i.test(msg))) return claveMala(msg);
+      if(st===429){ ultimo="limite"; if(/day|daily|per day|quota/i.test(msg) && intento>0) break; await espera_(3000*(intento+1)); continue; }
+      if(st>=500 || st===0){ ultimo="servidor"; await espera_(1500*(intento+1)); continue; }
+      ultimo="otro"; break;
+    }
   }
-  return "No pude conectarme con la inteligencia de Google. Revisa tu internet o tu clave e inténtalo otra vez.";
+  return {lento:"Google está tardando mucho en responder. Revisa tu señal e inténtalo otra vez.",
+          red:"No pude conectarme a internet. Revisa tus datos o wifi e inténtalo otra vez.",
+          limite:"Llegué al límite gratuito de preguntas por ahora. Espera un minuto e inténtalo de nuevo.",
+          servidor:"Los servidores de Google están ocupados. Inténtalo otra vez en unos segundos.",
+          vacia:"No me llegó la respuesta completa. ¿Me lo preguntas otra vez?",
+          modelo:"No encontré un modelo de Google disponible para tu clave. Revisa «Preguntas libres» y toca Probar conexión."}[ultimo]
+         || "No pude responder ahora. Toca «Probar conexión» en Preguntas libres para ver qué pasa.";
+}
+function claveMala(msg){
+  if(/ACCESS_TOKEN_TYPE_UNSUPPORTED|token type/i.test(msg)) return "Google no acepta este tipo de clave en tu cuenta. Crea una clave nueva en AI Studio y pégala en «Preguntas libres».";
+  return "Tu clave de Google no funciona. Revisa que la copiaste completa en «Preguntas libres», o crea una nueva.";
 }
 
 conversar = async function(entrada){
   if(!entrada || !entrada.trim()) return;
-  let r = responder(entrada);
+  let r;
+  try{ r = responder(entrada); }catch(e){ r = null; }
   belaLog.push({tu: entrada.trim(), bela: r ?? "Pensando…"}); if(belaLog.length>8) belaLog.shift();
   pintarLog();
   if(r === null){
-    orbe("habla"); const st=document.getElementById("orbSt"); if(st) st.textContent="BELA · PENSANDO";
-    r = await preguntarIA(entrada);
-    belaLog[belaLog.length-1].bela = r; pintarLog(); orbe("");
+    orbe("piensa");
+    try{ r = await preguntarIA(entrada); }catch(e){ r = "Tuve un problema al pensar la respuesta. Inténtalo otra vez."; }
+    belaLog[belaLog.length-1].bela = r; pintarLog(); orbe(""); pintarIA();
   }
   hablar(r);
 };
 
 function panelIA(){
-  const k = iaClave();
-  return `<h3>Preguntas libres</h3>
-   <p class="note">BELA responde sola todo lo de tu horario. Para cualquier otra pregunta, como tareas, la Biblia, recetas o consejos, se conecta a la inteligencia gratuita de Google (Gemini). Necesita internet.</p>
-   <p class="note"><b>Cómo conseguir tu clave gratis:</b> entra a <span class="sel">aistudio.google.com/apikey</span> con tu cuenta de Google → <b>Create API key</b> → cópiala y pégala aquí.</p>
-   <div class="row ask"><input type="password" id="iaKey" placeholder="${k?"Clave guardada ••••"+esc(k.slice(-4)):"Pega aquí tu clave de Google"}" aria-label="Clave de Google AI"><button class="btn sm" id="iaSave">${k?"Cambiar":"Guardar"}</button></div>
-   <div class="row"><span class="pill ${k?"p-ok":"p-warn"}">${k?"Preguntas libres activadas":"Sin conectar"}</span>${k?`<button class="btn ghost sm" id="iaTest">Probar</button><button class="btn ghost sm" id="iaDel">Quitar clave</button>`:""}</div>
-   <p class="note">La clave se guarda solo en este celular. En el plan gratuito, Google puede usar las preguntas para mejorar su servicio: no le cuentes datos privados de otras personas.</p>`;
+  const k = iaClave(), d = S.iaDiag||{};
+  const estado = !k ? `<span class="pill p-warn">Sin conectar</span>`
+    : d.ok ? `<span class="pill p-ok">Conectada ✓</span>`
+    : d.status!=null&&d.cuando ? `<span class="pill p-bad">Último intento falló</span>` : `<span class="pill p-lav">Clave guardada</span>`;
+  return `<div id="iaBox" class="stack"><h3>Preguntas libres</h3>
+   <p class="note">BELA responde sola todo lo de tu horario. Para cualquier otra pregunta se conecta a Gemini, la inteligencia gratuita de Google. Necesita internet.</p>
+   <p class="note"><b>Clave gratis:</b> entra a <span class="sel">aistudio.google.com/apikey</span> → <b>Crear clave</b> → <b>Copiar clave</b> y pégala aquí.</p>
+   <div class="row ask"><input type="password" id="iaKey" placeholder="${k?"Clave guardada ••••"+esc(k.slice(-4)):"Pega aquí tu clave de Google"}" aria-label="Clave de Google AI" autocomplete="off"><button class="btn sm" id="iaSave">${k?"Cambiar":"Guardar"}</button></div>
+   <div class="row">${estado}${k?`<button class="btn ghost sm" id="iaTest">Probar conexión</button><button class="btn ghost sm" id="iaDel">Quitar clave</button>`:""}</div>
+   ${d.ok?`<p class="note">Última respuesta: ${esc(d.cuando)} · ${esc(d.modelo)}</p>`:d.cuando?`<p class="note diag">Detalle del error (${esc(d.cuando)}): código ${esc(d.status)} ${esc(d.msg)}</p>`:""}
+   <p class="note">La clave se guarda solo en este celular. En el plan gratuito, Google puede usar las preguntas para mejorar su servicio: no le cuentes datos privados de otras personas.</p></div>`;
 }
+function pintarIA(){ const b=document.getElementById("iaBox"); if(!b) return; b.outerHTML=panelIA(); bindIA(); }
 function bindIA(){
   const $=id=>document.getElementById(id);
-  $("iaSave").onclick=()=>{ const v=$("iaKey").value.trim(); if(v.length<20){ $("iaKey").value=""; $("iaKey").placeholder="Esa clave parece incompleta"; return; } iaGuardar(v); render(); };
-  if($("iaTest")) $("iaTest").onclick=()=>conversar("Preséntate en una frase y dime un versículo corto de ánimo.");
-  if($("iaDel")) $("iaDel").onclick=()=>{ iaGuardar(""); render(); };
+  if(!$("iaSave")) return;
+  $("iaSave").onclick=()=>{ const v=$("iaKey").value.replace(/\s+/g,""); if(v.length<20){ $("iaKey").value=""; $("iaKey").placeholder="Esa clave parece incompleta"; return; } iaGuardar(v); S.iaDiag={}; iaHist=[]; pintarIA(); };
+  if($("iaTest")) $("iaTest").onclick=()=>{ iaHist=[]; conversar("Preséntate en una frase y dime un versículo corto de ánimo."); };
+  if($("iaDel")) $("iaDel").onclick=()=>{ iaGuardar(""); S.iaDiag={}; pintarIA(); };
 }
+
+/* ---------- reiniciar y cerrar ---------- */
+const APP = plug("App");
+function reiniciarApp(){ try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){} location.reload(); }
+async function cerrarApp(){ try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){} try{ TTS&&TTS.stop(); }catch(e){} if(APP&&APP.exitApp){ try{ await APP.exitApp(); return; }catch(e){} } alarmEstado="Para cerrar, desliza la app hacia arriba en tus apps recientes."; pintarEstado(); }
 
 function render(){
   document.querySelectorAll("nav button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===tab));
-  ({asistente:renderAsistente,hoy:renderHoy,semana:renderSemana,mes:renderMes,tareas:renderTareas,ajustes:renderAjustes})[tab]();
+  ({asistente:renderAsistente,alarmas:renderAlarmas,horario:renderHorario,hoy:renderHoy,semana:renderSemana,mes:renderMes,tareas:renderTareas,ajustes:renderAjustes})[tab]();
 }
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render();});
+document.getElementById("btnReini").onclick=reiniciarApp;
+document.getElementById("btnCerrar").onclick=cerrarApp;
+if(!NATIVE) document.getElementById("btnCerrar").hidden=true;
 render();
 </script>
 
