@@ -34,7 +34,7 @@ button,input,select{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--lav);outline-offset:2px}
 .panel{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px}
 .stack{display:flex;flex-direction:column;gap:14px}
-.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:16px}.grid2>*{min-width:0}.ask .btn{flex:none}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:16px}.grid2>*{min-width:0}.ask .btn{flex:none}.sel{user-select:all;font-weight:700;color:var(--gold)}
 @media (max-width:820px){.grid2{grid-template-columns:1fr}}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted);font-weight:600}
 input[type=time],input[type=number],input[type=text],input[type=date],select{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
@@ -256,7 +256,10 @@ function fixedFor(date){
 
 function computeDay(date){
   const wd=pd(date).getDay(), c=S.cfg, r=dayRec(date), wk=getWeek(monday(date));
-  const wake=toM(c.wake), bed=wake+1440-Math.round(c.goal*60);  // hora objetivo para dormir
+  const wake = r.wake ? toM(r.wake) : toM(c.wake);
+  const rN = dayRec(addD(date,1)); const nextWake = rN.wake ? toM(rN.wake) : toM(c.wake);
+  const bedAuto = nextWake+1440-Math.round(c.goal*60);
+  const bed = r.bed!=null ? r.bed : bedAuto;  // hora para dormir (elegida o recomendada)
   const T=+c.travel, M=+c.margin, ct=+c.churchTravel;
   const blocks=[], alerts=[];
   const planned = wk.st!=="flexible" && (wk.homeDays||[]).includes(wd);
@@ -264,7 +267,8 @@ function computeDay(date){
   const from = chosen ? r.from : (planned?"casa":"");
   const fromState = chosen ? "elegido" : (planned?(wk.st==="confirmada"?"semana confirmada":"propuesta"):"sin decidir");
 
-  blocks.push({s:wake,e:toM("07:23"),l:"Levantarme, alistarme y devocional breve",k:"casa"});
+  if(wake < toM("07:23")) blocks.push({s:wake,e:toM("07:23"),l:wake<=toM("07:00")?"Levantarme, alistarme y devocional breve":"Levantarme y alistarme rápido",k:"casa"});
+  else { blocks.push({s:wake,e:wake+20,l:"Levantarme y alistarme rápido",k:"casa"}); alerts.push({lvl:"warn",t:`Hoy te levantaste a las ${fmt(wake)}: llegarás al negocio después de las 7:30 a. m. Avísale a tu mamá. El devocional pasa a un momento libre.`}); }
   blocks.push({s:toM("07:23"),e:toM("07:30"),l:"Traslado al negocio",k:"tras"});
 
   let salida, salidaTipo;
@@ -328,16 +332,19 @@ function computeDay(date){
 
   // sueño
   const lastEnd=Math.max(...blocks.map(b=>b.e));
-  const sleepH=((wake+1440)-(lastEnd+30))/60;
+  const sleepStart=Math.max(bed,lastEnd+30);
+  const sleepH=((nextWake+1440)-sleepStart)/60;
+  if(r.bed!=null && lastEnd+30<=bed && sleepH < c.goal-0.01) alerts.push({lvl:"warn",t:`Elegiste dormir a las ${fmt(bed)}: dormirás ${sleepH.toFixed(1)} h (meta: ${c.goal} h).`});
   if(lastEnd+30>bed) alerts.push({lvl:"bad",t:`Esta noche terminas a las ${fmt(lastEnd)}. Con 30 min para prepararte, duermes ${sleepH.toFixed(1)} h (meta: ${c.goal} h). Revisa si alguna actividad nocturna puede moverse o acortarse.`});
 
   blocks.sort((a,b)=>a.s-b.s||a.e-b.e);
-  return {date,wd,wake,bed,salida,salidaTipo,llegada:home,from,fromState,blocks,alerts,sleepH,lastEnd,negFin,uniNeg:fx.some(b=>b.where==="negocio")};
+  return {date,wd,wake,nextWake,bed,bedAuto,bedElegida:r.bed!=null,sleepStart,salida,salidaTipo,llegada:home,from,fromState,blocks,alerts,sleepH,lastEnd,negFin,uniNeg:fx.some(b=>b.where==="negocio")};
 }
 
 /* huecos libres de un día (casa) y en el negocio */
 function freeWindows(day){
-  const lo=day.wake, hi=Math.min(day.bed-30, 24*60);
+  const rr=dayRec(day.date);
+  const lo=Math.max(day.wake, rr.desde||0), hi=Math.min(day.bed-30, 24*60);
   const busy=day.blocks.map(b=>[b.s,b.e]).sort((a,b)=>a[0]-b[0]);
   const out=[]; let cur=lo;
   for(const [s,e] of busy){ if(s>cur) out.push({s:cur,e:Math.min(s,hi),place:"casa"}); cur=Math.max(cur,e); if(cur>=hi) break; }
@@ -376,7 +383,9 @@ function planWeek(mon){
   }
   for(const t of tasks){
     if(t.off) continue;
-    for(let k=0;k<(+t.x||1);k++){
+    const hechas = days.filter(d=>(dayRec(d.date).done||[]).includes(t.id)).length;
+    days.forEach((d,di)=>{ const rr=dayRec(d.date); if((rr.done||[]).includes(t.id)||(rr.skip||[]).includes(t.id)) placed[di].push({id:t.id,dry:1}); });
+    for(let k=0;k<Math.max(0,(+t.x||1)-hechas);k++){
       const order=[...Array(7).keys()].sort((a,b)=>{
         const pa=(t.pref||[]).includes(days[a].wd)?0:1, pb=(t.pref||[]).includes(days[b].wd)?0:1;
         return pa-pb || load[a]-load[b] || a-b;
@@ -648,7 +657,8 @@ const LN=plug("LocalNotifications"), TTS=plug("TextToSpeech");
 /* hora dicha en voz alta */
 function say(m){
   m=((m%1440)+1440)%1440; const h=Math.floor(m/60), mi=m%60; const h12=h%12||12;
-  const parte = h<12?"de la mañana":h===12?"del mediodía":h<19?"de la tarde":"de la noche";
+  if(h===0&&mi===0) return "la medianoche";
+  const parte = h<5?"de la madrugada":h<12?"de la mañana":h===12?"del mediodía":h<19?"de la tarde":"de la noche";
   const art = h12===1?"la una":"las "+h12;
   const min = mi===0?"":mi===15?" y cuarto":mi===30?" y media":" y "+mi;
   return art+min+" "+parte;
@@ -752,14 +762,15 @@ function parseHora(t, modo){
   const m = t.match(new RegExp("\\b(?:a las|a la|las|la) "+R)) || t.match(new RegExp("\\b"+R));
   if(!m) return null;
   let h = +m[1], mi = 0;
-  if(h > 23) return null;
+  if(h > 24) return null;
   if(m[2]) mi = m[2]==="media"?30 : m[2]==="cuarto"?15 : +m[2];
   if(mi > 59) return null;
   const ap = m[3]||"";
   if(/tarde|noche|pm|p m/.test(ap) && h < 12) h += 12;
   if(/manana|am|a m/.test(ap) && h === 12) h = 0;
   if(!ap && h <= 12){
-    if(modo === "mama"){ if(h <= 5) h += 12; }
+    if(modo === "noche"){ if(h >= 7 && h < 12) h += 12; else if(h === 12) h = 24; }
+    else if(modo === "mama"){ if(h <= 5) h += 12; }
     else if(h <= 6) h += 12;
   }
   return {min: h*60+mi, texto: m[0]};
@@ -772,8 +783,15 @@ function bloquesDesde(date, desde, hasta){
 const limpio = l => l.replace(/\(.*?\)/g,"").trim();
 const nombre = () => S.cfg.nombre || "Brigit";
 
+
+const horasTxt = h => h.toFixed(1).replace(".0","").replace("."," coma ");
+const CLAVES = [/ejercicio|gimnasio|entrenar|caminar|correr/, /canto|cantar|vocal/, /ropa|lavar/, /ensenanza/, /tarea|universidad|trabajos? de la/, /senorita|seguimiento/, /limpiar|ordenar|habitacion|cuarto/, /ingles/, /analisis|datos/];
+function buscarTarea(t){
+  for(const re of CLAVES){ if(re.test(t)){ const k=S.tasks.find(x=>re.test(norm(x.n))); if(k) return k; } }
+  return S.tasks.find(x=>norm(x.n).split(" ").some(w=>w.length>5 && t.includes(w))) || null;
+}
 function responder(entrada){
-  const t = norm(entrada), hoy = ds(new Date()), ahora = new Date().getHours()*60+new Date().getMinutes();
+  const t = norm(entrada).replace(/^(oye |hola )?bela,? /,""), hoy = ds(new Date()), ahora = new Date().getHours()*60+new Date().getMinutes();
 
   if(espera && espera.tipo === "hora-recordatorio"){
     const h = parseHora(t);
@@ -807,6 +825,95 @@ function responder(entrada){
     return crearRecordatorio(txt, h.min, manana);
   }
 
+
+  // ===== Reorganizar el día =====
+  const fechaDe = txt => {
+    const x = txt.replace(/de la manana/g,"");
+    if(/pasado manana/.test(x)) return addD(hoy,2);
+    if(/\bmanana\b/.test(x)) return addD(hoy,1);
+    const dias = ["domingo","lunes","martes","miercoles","jueves","viernes","sabado"];
+    for(let i=0;i<7;i++) if(new RegExp("\\b"+dias[i]+"\\b").test(x)){ const dd=(i-pd(hoy).getDay()+7)%7; return addD(hoy,dd); }
+    return hoy;
+  };
+  const cuando = f => f===hoy?"hoy":f===addD(hoy,1)?"mañana":"el "+nice(f).toLowerCase();
+
+  // Hora de dormir: "hoy dormiré a las 11", "me voy a acostar a las 10 y media"
+  if(/(dormir|dormire|acostar|acostare|acuesto|me duermo|a la cama)/.test(t) && !/cuantas horas|horas voy|a que hora debo|que hora debo/.test(t)){
+    const h = parseHora(t, "noche");
+    if(h){
+      let m = h.min; if(m < 6*60) m += 1440;          // después de medianoche
+      const f = /\bmanana\b/.test(t.replace(/de la manana/g,"")) ? addD(hoy,1) : hoy;
+      setDay(f, {bed:m});
+      const d = computeDay(f), p = planWeek(monday(f)), di=(d.wd+6)%7;
+      const resto = p.placed[di].filter(x=>x.s>=ahora || f!==hoy);
+      let r = `Listo. ${cuando(f).charAt(0).toUpperCase()+cuando(f).slice(1)} duermes a ${say(m)}. Te levantas a ${say(d.nextWake)}, así que dormirás unas ${horasTxt(d.sleepH)} horas. `;
+      r += d.sleepH < S.cfg.goal-0.01 ? `Es menos que tu meta de ${S.cfg.goal}. ` : `Cumples tu meta de sueño. `;
+      if(d.lastEnd+30 > m) r += `Ojo: tu último compromiso termina a ${say(d.lastEnd)}, después de esa hora. `;
+      r += resto.length ? `Reorganicé tus tareas: ${resto.map(x=>`${limpio(x.l)} a ${say(x.s)}`).join("; ")}. ` : `No quedan tareas flexibles para esa noche. `;
+      return r + `Te avisaré media hora antes para prepararte.`;
+    }
+    if(/(normal|recomendad|de siempre)/.test(t)){ const f=hoy; const rr=Object.assign({},dayRec(f)); delete rr.bed; S.days[f]=rr; save(); render(); const d=computeDay(f); return `Volví a tu hora recomendada: dormir a ${say(d.bed)}.`; }
+    return "¿A qué hora piensas dormir? Dime, por ejemplo: hoy dormiré a las once.";
+  }
+  // A qué hora debo dormir
+  if(/a que hora (debo|deberia|tengo que) (dormir|acostarme)/.test(t)){
+    const d = computeDay(hoy);
+    return `Para dormir ${S.cfg.goal} horas y levantarte a ${say(d.nextWake)}, acuéstate a ${say(d.bedAuto)}.${d.lastEnd+30>d.bedAuto?` Pero hoy terminas a ${say(d.lastEnd)}, así que lo más temprano posible es ${say(d.lastEnd+30)}.`:""} Empieza a prepararte a ${say(d.bedAuto-30)}.`;
+  }
+  // Hora de levantarse: "me levanté a las 7", "mañana me levanto a las 6"
+  if(/(me levante|me desperte|me levanto|me despierto|levantarme|despertarme)/.test(t)){
+    const h = parseHora(t, "mama");
+    if(!h) return "¿A qué hora te levantas? Dime, por ejemplo: mañana me levanto a las seis.";
+    const f = /(me levante|me desperte)/.test(t) ? hoy : (/\bmanana\b/.test(t.replace(/de la manana/g,"")) ? addD(hoy,1) : (h.min > ahora ? hoy : addD(hoy,1)));
+    setDay(f, {wake:toS(h.min)});
+    const d = computeDay(f), prev = computeDay(addD(f,-1));
+    let r = `Anotado: ${cuando(f)} te levantas a ${say(h.min)}. `;
+    if(h.min >= toM("07:23")) r += `Llegarás al negocio después de las 7 y media, avísale a tu mamá. `;
+    if(addD(f,-1)>=hoy) r += `Para descansar ${S.cfg.goal} horas, la noche anterior acuéstate a ${say(prev.bedAuto)}.${prev.bedElegida?` Habías elegido dormir a ${say(prev.bed)}: así dormirías ${horasTxt(prev.sleepH)} horas.`:""} `;
+    r += `Ya ajusté tus alarmas.`;
+    return r;
+  }
+  // Reorganizar desde ahora
+  if(/(reorganiza|reacomoda|reprograma|replanifica|ordena de nuevo|vuelve a organizar|no termine|me atrase|se me hizo tarde)/.test(t)){
+    const f = fechaDe(t);
+    if(f===hoy) setDay(hoy, {desde: ahora+5});
+    const items = bloquesDesde(f, f===hoy?ahora:0, 24*60).filter(b=>f!==hoy||b.s>=ahora);
+    const p = planWeek(monday(f)); const mov = p.days.flatMap((d,i)=>d.date>f?p.placed[i].map(x=>({x,d})):[]).slice(0,3);
+    let r = `Listo, reorganicé ${cuando(f)}${f===hoy?" desde ahora":""}. `;
+    r += items.length ? "Te queda: "+items.map(b=>`${say(b.s)}, ${limpio(b.l)}`).join("; ")+". " : "Ya no te quedan compromisos. ";
+    if(p.unplaced.length) r += `No alcanza el tiempo para: ${[...new Set(p.unplaced.map(x=>limpio(x.n)))].join(", ")}; quedan para la próxima semana. `;
+    const d = computeDay(f);
+    return r + `Duermes a ${say(d.sleepStart)}.`;
+  }
+  // Tarea hecha / omitida
+  const tarea = buscarTarea(t);
+  if(tarea && /(ya hice|ya termine|termine|hice|complete|listo con|ya acabe)/.test(t)){
+    const f = fechaDe(t); setDay(f, {done:[...new Set([...(dayRec(f).done||[]),tarea.id])]});
+    const p = planWeek(monday(f)); const quedan = p.placed.flat().filter(x=>x.id===tarea.id).length;
+    return `¡Bien hecho, ${nombre()}! Marqué «${limpio(tarea.n)}» como hecha${quedan?`. Te quedan ${quedan} ${quedan===1?"vez":"veces"} esta semana`:". Ya cumpliste con esa tarea esta semana"}.`;
+  }
+  if(tarea && /(no hare|no voy a|no puedo|cancela|quita|salta|omite|mueve|pasa|cambia|no podre)/.test(t)){
+    const f = fechaDe(t.replace(/\b(a|para) (el )?(manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/,""));
+    setDay(f, {skip:[...new Set([...(dayRec(f).skip||[]),tarea.id])]});
+    const p = planWeek(monday(f)); const nuevo = p.days.map((d,i)=>({d,x:p.placed[i].find(y=>y.id===tarea.id)})).find(o=>o.x && o.d.date>=f && o.d.date!==f);
+    return `Entendido, ${cuando(f)} no haces «${limpio(tarea.n)}».${nuevo?` La pasé al ${DN[nuevo.d.wd].toLowerCase()} a ${say(nuevo.x.s)}.`:" Esta semana ya no hay otro espacio libre sin quitarte sueño, así que queda para la próxima."}`;
+  }
+  // Nuevo compromiso: "tengo una reunión el miércoles a las 7 de la noche"
+  const ev = t.match(/(?:tengo|agrega|anota|programa|pon)\s+(?:una?\s+)?(reunion|cita|salida|ensayo|fiesta|evento|clase|actividad|examen|exposicion|culto|vigilia|cumpleanos|almuerzo|cena|encuentro)\b(.*)/);
+  if(ev){
+    const h = parseHora(ev[2]);
+    if(!h) return `¿A qué hora es la ${ev[1]}? Dímelo junto con el día, por ejemplo: tengo una ${ev[1]} el miércoles a las siete de la noche.`;
+    const f = fechaDe(ev[2]);
+    const hasta = ev[2].match(/hasta (?:las |la )?(.+)/); const hf = hasta ? parseHora("a las "+hasta[1]) : null;
+    const fin = hf && hf.min>h.min ? hf.min : h.min+60;
+    const original = entrada.match(/(reuni[oó]n|cita|salida|ensayo|fiesta|evento|clase|actividad|examen|exposici[oó]n|culto|vigilia|cumplea[nñ]os|almuerzo|cena|encuentro)([^,.?¡!]*?)(?=\s+(el|este|esta|hoy|mañana|pasado|a las|a la|desde|hasta)\b|$)/i);
+    let nom = original ? (original[1]+original[2]).trim() : ev[1];
+    nom = nom.charAt(0).toUpperCase()+nom.slice(1);
+    const lugar = /(virtual|zoom|meet|en casa|online)/.test(t) ? "casa" : "fuera";
+    setDay(f, {extra:[...(dayRec(f).extra||[]),{l:nom,s:toS(h.min),e:toS(Math.min(fin,1439)),p:lugar}]});
+    const d = computeDay(f); const ch = d.alerts.filter(a=>a.lvl==="bad"&&a.t.includes(nom));
+    return `Anotado: ${nom} ${cuando(f)} de ${say(h.min)} a ${say(fin)}${lugar==="fuera"?`, con ${S.cfg.churchTravel} minutos de traslado`:""}. ${ch.length?"Ojo: "+ch[0].t:"No choca con nada."} Reorganicé tus tareas de ese día.`;
+  }
   // Desde dónde estudia hoy
   const desde = t.match(/estudi\w*\s+(?:hoy\s+)?(?:desde|en)\s+(?:el\s+|la\s+|mi\s+)?(casa|negocio|tienda)/);
   if(desde){
@@ -818,27 +925,27 @@ function responder(entrada){
 
   if(/(organiza|planifica|que hago|que me toca).*(tarde)/.test(t)) return resumenTramo(hoy, Math.max(ahora, 12*60), 19*60, "esta tarde");
   if(/(organiza|planifica|que hago|que me toca).*(noche)/.test(t)) return resumenTramo(hoy, Math.max(ahora, 19*60), 24*60, "esta noche");
-  if(/(siguiente|proxim|que sigue|ahora que)/.test(t)){
+  if(/^(que sigue|que me toca ahora|que hago ahora|que viene|lo siguiente|cual es mi proxima actividad|que es lo siguiente)$/.test(t)){
     const b = bloquesDesde(hoy, ahora, 24*60).find(x=>x.s>=ahora);
     return b ? `Lo siguiente: ${limpio(b.l)} a ${say(b.s)}${b.where==="negocio"?", desde el negocio":""}.` : "No tienes más compromisos por hoy. Toca descansar.";
   }
-  if(/(dorm|sueno|descans|horas voy)/.test(t)){
+  if(/(cuantas horas (voy a )?dorm|cuanto (voy a )?dorm|horas de sueno|cuanto descanso)/.test(t)){
     const d = computeDay(hoy);
-    return `Hoy terminas a ${say(d.lastEnd)}. Si te acuestas a ${say(Math.max(d.bed, d.lastEnd+30))} y te levantas a ${say(d.wake)}, dormirás unas ${d.sleepH.toFixed(1).replace(".0","").replace("."," coma ")} horas. Tu meta es ${S.cfg.goal}.`;
+    return `Hoy terminas a ${say(d.lastEnd)}. Si te acuestas a ${say(d.sleepStart)}${d.bedElegida?", como me dijiste,":""} y te levantas a ${say(d.nextWake)}, dormirás unas ${horasTxt(d.sleepH)} horas. Tu meta es ${S.cfg.goal}.`;
   }
-  if(/semana/.test(t)){
+  if(/(como (viene|esta|va) mi semana|mi semana|resumen de (la|mi) semana)/.test(t)){
     const p = planWeek(monday(hoy)), w = getWeek(monday(hoy));
     const malas = p.days.filter(d=>d.sleepH<S.cfg.goal).map(d=>DN[d.wd].toLowerCase());
     const ch = p.days.reduce((a,d)=>a+d.alerts.filter(x=>x.lvl==="bad").length,0);
     return `Esta semana ${w.st==="flexible"?"es flexible":"planeas estudiar desde casa el "+((w.homeDays||[]).map(x=>DN[x].toLowerCase()).join(" y el ")||"ningún día aún")+(w.st==="confirmada"?", ya confirmado con tu mamá":", pero falta conversarlo con tu mamá")}. ${ch?`Tienes ${ch} avisos importantes.`:"No hay choques."} ${malas.length?"Noches cortas: "+malas.join(", ")+".":"Todas las noches alcanzas tu meta de sueño."}`;
   }
-  if(/\bmanana\b/.test(t.replace(/de la manana/g,"")) && !/hoy/.test(t)) return resumenDia(addD(hoy,1), false);
-  if(/(que hora es|la hora)/.test(t)) return `Son ${say(ahora)}.`;
-  if(/(que tengo|mi dia|agenda|hoy|horario)/.test(t)) return resumenDia(hoy, false);
-  if(/(gracias)/.test(t)) return `Con gusto, ${nombre()}. Aquí estoy cuando me necesites.`;
-  if(/(ayuda|que puedes|que sabes|como funcionas)/.test(t)) return ayudaTexto();
-  if(/(hola|buenos dias|buenas tardes|buenas noches|bela)/.test(t)) return saludo();
-  return `No te entendí bien, ${nombre()}. ${ayudaTexto()}`;
+  if(/^(que tengo|que hay|que me toca|como es mi dia|mi agenda de|mi horario de)? ?manana$|que tengo (para )?manana/.test(t)) return resumenDia(addD(hoy,1), false);
+  if(/^(que hora es|dime la hora)$/.test(t)) return `Son ${say(ahora)}.`;
+  if(/^(que tengo( hoy)?|que hay hoy|mi dia|mi agenda|mi horario|que me toca hoy|que tengo que hacer hoy|agenda de hoy|como es mi dia)$/.test(t)) return resumenDia(hoy, false);
+  if(/^(muchas )?gracias( bela)?$/.test(t)) return `Con gusto, ${nombre()}. Aquí estoy cuando me necesites.`;
+  if(/^(ayuda|que puedes hacer|como funcionas|que sabes hacer)$/.test(t)) return ayudaTexto();
+  if(/^(hola|buenos dias|buenas tardes|buenas noches|bela|hola bela)$/.test(t)) return saludo();
+  return null;  // cualquier otra pregunta va a la IA
 }
 
 function crearRecordatorio(txt, min, manana){
@@ -856,7 +963,7 @@ function resumenTramo(date, desde, hasta, etiqueta){
   return `Así queda ${etiqueta}: ` + items.map(b=>`${say(b.s)}, ${limpio(b.l)}`).join("; ") + ". Lo demás es tiempo libre.";
 }
 function ayudaTexto(){
-  return "Puedes decirme: qué tengo hoy, qué tengo mañana, qué sigue, organiza mi tarde, mi mamá regresó a las diez, hoy estudio desde casa, recuérdame llamar a una señorita a las cinco, o cuántas horas voy a dormir.";
+  return "Puedes decirme: qué tengo hoy o mañana, qué sigue, hoy dormiré a las once, mañana me levanto a las seis, reorganiza mi día, ya hice mi ejercicio, hoy no haré la tarea de la universidad, tengo una reunión el miércoles a las siete de la noche, mi mamá regresó a las diez, o recuérdame llamar a una señorita a las cinco.";
 }
 function saludo(){
   const h = new Date().getHours();
@@ -942,9 +1049,9 @@ function renderAsistente(){
      <div class="hud" id="orbSt">BELA · EN LÍNEA</div>
      <p id="asTexto" class="say">Hola, ${esc(nombre())}. Toca el micrófono y háblame.</p>
      <button class="mic" id="mic" aria-label="Hablar con BELA"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg><span>Hablar con BELA</span></button>
-     <form id="belaForm" class="row ask"><input type="text" id="belaIn" placeholder="O escríbele: ¿qué tengo hoy?" aria-label="Escribe a BELA"><button class="btn" type="submit">Enviar</button></form>
+     <form id="belaForm" class="row ask"><input type="text" id="belaIn" placeholder="Pregúntale lo que quieras" aria-label="Escribe a BELA"><button class="btn" type="submit">Enviar</button></form>
      <div class="chips">
-       ${["¿Qué tengo hoy?","¿Qué sigue?","Organiza mi tarde","¿Qué tengo mañana?","¿Cuántas horas dormiré?","¿Cómo viene mi semana?"].map(q=>`<button class="chip" data-q="${q}">${q}</button>`).join("")}
+       ${["¿Qué tengo hoy?","¿Qué sigue?","Reorganiza mi día","¿A qué hora debo dormir?","¿Cuántas horas dormiré?","¿Qué tengo mañana?"].map(q=>`<button class="chip" data-q="${q}">${q}</button>`).join("")}
        <button class="chip" data-callar="1">Silencio</button>
      </div>
      <div class="log" id="belaLog"></div>
@@ -967,6 +1074,7 @@ function renderAsistente(){
        <label class="f">Velocidad<select id="asRate">${[[0.85,"Lenta"],[1,"Normal"],[1.15,"Rápida"]].map(([v,t])=>`<option value="${v}" ${+c.rate===v?"selected":""}>${t}</option>`).join("")}</select></label>
        <label class="f">Cómo te llamo<input type="text" id="asNom" value="${esc(c.nombre)}"></label>
      </div>
+     ${panelIA()}
    </section></div>`;
   const $=id=>document.getElementById(id);
   pintarLog();
@@ -981,6 +1089,84 @@ function renderAsistente(){
   $("asVoz").onchange=e=>{ c.voz=e.target.checked; save(); };
   $("asRate").onchange=e=>{ c.rate=+e.target.value; save(); };
   $("asNom").onchange=e=>{ c.nombre=e.target.value.trim(); save(); render(); };
+  bindIA();
+}
+
+/* ================= BELA + IA (preguntas libres con Gemini) ================= */
+const IA_LS = "bela-ia-clave";
+const IA_MODELOS = ["gemini-3.5-flash-lite","gemini-3.8-flash","gemini-2.5-flash"];
+let iaHist = [];
+const iaClave = () => { try{ return localStorage.getItem(IA_LS)||""; }catch(e){ return ""; } };
+const iaGuardar = k => { try{ k?localStorage.setItem(IA_LS,k.trim()):localStorage.removeItem(IA_LS); }catch(e){} };
+const sinMarkdown = x => x.replace(/```[\s\S]*?```/g," ").replace(/[*_#>`]+/g,"").replace(/^\s*[-•]\s+/gm,"").replace(/\n{2,}/g,"\n").trim();
+
+function contextoIA(){
+  const hoy = ds(new Date()), ahora = new Date().getHours()*60+new Date().getMinutes();
+  return `Eres BELA, la asistente personal por voz de ${nombre()}, una estudiante universitaria de Ingeniería de Sistemas en Lima, Perú. Hablas en español peruano, con calidez, de forma clara y breve.
+Responde cualquier pregunta que te haga, de cualquier tema: estudios, Biblia, cocina, consejos, cultura general, tecnología, etc.
+Tus respuestas se leen en voz alta: usa 2 a 5 frases cortas, sin listas largas, sin símbolos, sin markdown, sin emojis. Si piden algo más largo, resume lo esencial y ofrece continuar.
+Si no sabes algo o puede haber cambiado, dilo con honestidad. Para temas de salud, legales o de dinero, da información general y sugiere consultar a un profesional.
+No inventes compromisos. Si te pide cambiar su horario, dile que use frases como «hoy dormiré a las once» o «reorganiza mi día», porque esas las hace la app directamente.
+Ahora son ${say(ahora)} del ${nice(hoy).toLowerCase()}.
+Su día de hoy: ${resumenDia(hoy,false)}
+Mañana: ${resumenDia(addD(hoy,1),false)}`;
+}
+
+async function preguntarIA(pregunta){
+  const clave = iaClave();
+  if(!clave) return `Para responder preguntas de cualquier tema necesito que me conectes a la inteligencia de Google. Ve abajo, a «Preguntas libres», y pega tu clave gratuita. Mientras tanto, ${ayudaTexto().charAt(0).toLowerCase()+ayudaTexto().slice(1)}`;
+  if(navigator.onLine === false) return "No tengo internet ahora. Las órdenes de tu horario sí funcionan sin conexión.";
+  const contents = [...iaHist, {role:"user", parts:[{text:pregunta}]}];
+  const body = JSON.stringify({systemInstruction:{parts:[{text:contextoIA()}]}, contents, generationConfig:{maxOutputTokens:600, temperature:0.7}});
+  const modelos = [S.cfg.iaModelo, ...IA_MODELOS].filter((m,i,a)=>m && a.indexOf(m)===i);
+  for(const m of modelos){
+    const ctl = new AbortController(); const to = setTimeout(()=>ctl.abort(), 30000);
+    try{
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {method:"POST", headers:{"Content-Type":"application/json","x-goog-api-key":clave}, body, signal:ctl.signal});
+      clearTimeout(to);
+      if(res.status===404) continue;
+      if(res.status===429) return "Por ahora llegué al límite gratuito de preguntas. Inténtalo de nuevo en un minuto.";
+      if(res.status===400||res.status===401||res.status===403){ const e=await res.json().catch(()=>({})); const msg=(e.error&&e.error.message)||""; if(/api key|API_KEY|permission/i.test(msg)||res.status!==400) return "Tu clave de Google no funciona. Revisa que la copiaste completa en «Preguntas libres»."; continue; }
+      if(!res.ok) continue;
+      const data = await res.json();
+      const txt = sinMarkdown(((data.candidates||[])[0]?.content?.parts||[]).map(p=>p.text||"").join(""));
+      if(!txt) return "No supe qué responder a eso. ¿Me lo preguntas de otra forma?";
+      S.cfg.iaModelo = m;
+      iaHist.push({role:"user",parts:[{text:pregunta}]},{role:"model",parts:[{text:txt}]});
+      if(iaHist.length>12) iaHist = iaHist.slice(-12);
+      return txt;
+    }catch(e){ clearTimeout(to); if(e.name==="AbortError") return "Tardó demasiado la respuesta. Revisa tu internet e inténtalo otra vez."; }
+  }
+  return "No pude conectarme con la inteligencia de Google. Revisa tu internet o tu clave e inténtalo otra vez.";
+}
+
+conversar = async function(entrada){
+  if(!entrada || !entrada.trim()) return;
+  let r = responder(entrada);
+  belaLog.push({tu: entrada.trim(), bela: r ?? "Pensando…"}); if(belaLog.length>8) belaLog.shift();
+  pintarLog();
+  if(r === null){
+    orbe("habla"); const st=document.getElementById("orbSt"); if(st) st.textContent="BELA · PENSANDO";
+    r = await preguntarIA(entrada);
+    belaLog[belaLog.length-1].bela = r; pintarLog(); orbe("");
+  }
+  hablar(r);
+};
+
+function panelIA(){
+  const k = iaClave();
+  return `<h3>Preguntas libres</h3>
+   <p class="note">BELA responde sola todo lo de tu horario. Para cualquier otra pregunta, como tareas, la Biblia, recetas o consejos, se conecta a la inteligencia gratuita de Google (Gemini). Necesita internet.</p>
+   <p class="note"><b>Cómo conseguir tu clave gratis:</b> entra a <span class="sel">aistudio.google.com/apikey</span> con tu cuenta de Google → <b>Create API key</b> → cópiala y pégala aquí.</p>
+   <div class="row ask"><input type="password" id="iaKey" placeholder="${k?"Clave guardada ••••"+esc(k.slice(-4)):"Pega aquí tu clave de Google"}" aria-label="Clave de Google AI"><button class="btn sm" id="iaSave">${k?"Cambiar":"Guardar"}</button></div>
+   <div class="row"><span class="pill ${k?"p-ok":"p-warn"}">${k?"Preguntas libres activadas":"Sin conectar"}</span>${k?`<button class="btn ghost sm" id="iaTest">Probar</button><button class="btn ghost sm" id="iaDel">Quitar clave</button>`:""}</div>
+   <p class="note">La clave se guarda solo en este celular. En el plan gratuito, Google puede usar las preguntas para mejorar su servicio: no le cuentes datos privados de otras personas.</p>`;
+}
+function bindIA(){
+  const $=id=>document.getElementById(id);
+  $("iaSave").onclick=()=>{ const v=$("iaKey").value.trim(); if(v.length<20){ $("iaKey").value=""; $("iaKey").placeholder="Esa clave parece incompleta"; return; } iaGuardar(v); render(); };
+  if($("iaTest")) $("iaTest").onclick=()=>conversar("Preséntate en una frase y dime un versículo corto de ánimo.");
+  if($("iaDel")) $("iaDel").onclick=()=>{ iaGuardar(""); render(); };
 }
 
 function render(){
