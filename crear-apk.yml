@@ -1,0 +1,103 @@
+name: Crear APK de BELA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Preparar el proyecto
+        run: |
+          mkdir -p www
+          if [ -f index.html ]; then SRC=index.html; else SRC="$(ls index*.html | head -1)"; fi
+          echo "Usando $SRC"
+          cp "$SRC" www/index.html
+          rm -f package-lock.json
+          cat > package.json <<'JSON'
+          {
+            "name": "mi-asistente",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/android": "6.2.2",
+              "@capacitor/core": "6.2.2",
+              "@capacitor/local-notifications": "6.1.3",
+              "@capacitor-community/text-to-speech": "4.1.1",
+              "@capacitor-community/speech-recognition": "6.0.1"
+            },
+            "devDependencies": { "@capacitor/cli": "6.2.2" }
+          }
+          JSON
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "pe.brigit.miasistente",
+            "appName": "BELA",
+            "webDir": "www",
+            "plugins": { "LocalNotifications": { "iconColor": "#8E72C4" } }
+          }
+          JSON
+          npm install --no-audit --no-fund
+          rm -rf android
+          npx cap add android
+
+      - name: Permisos de alarmas y voz
+        run: |
+          python3 - <<'PY'
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p).read()
+          extra = '''
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+          </manifest>'''
+          s = s.replace("</manifest>", extra, 1)
+          open(p, "w").write(s)
+          PY
+          npx cap sync android
+
+      - name: Firma fija (para poder actualizar sin desinstalar)
+        run: |
+          mkdir -p ~/.android
+          echo "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" | base64 -d > ~/.android/debug.keystore
+
+      - name: Compilar APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Renombrar APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk BELA.apk
+
+      - name: Publicar para descargar desde el celular
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: BELA versión ${{ github.run_number }}
+          body: Descarga BELA.apk desde tu celular Android e instálalo.
+          files: BELA.apk
