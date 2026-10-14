@@ -133,6 +133,14 @@ header .hbtns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .diag{color:var(--bad);word-break:break-word}
 .orb[data-st="piensa"] b{background:radial-gradient(circle,#fff 0%,#d6f4ff 20%,#7fd6ff 48%,#7fd6ff00 74%);box-shadow:0 0 60px #7fd6ffaa}
 @media (prefers-reduced-motion:no-preference){.orb[data-st="piensa"] i:nth-child(1){animation-duration:1.2s}.orb[data-st="piensa"] i:nth-child(3){animation-duration:3s}}
+.wx{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;padding:12px 14px;border:1px solid #3b2d63;border-radius:14px;background:linear-gradient(135deg,#231a40,#170f2c)}
+.clk{font-size:.85rem;color:var(--gold);letter-spacing:.03em}.clk b{font-variant-numeric:tabular-nums}
+.wxmain{display:flex;gap:12px;align-items:center}.wxt{font-family:var(--f-display);font-size:2.6rem;line-height:1;color:var(--ink)}
+.wxd{display:flex;flex-direction:column;min-width:0}.wxd small{color:var(--muted)}
+.wxtip{margin:0;font-weight:600;color:var(--lav-ink)}
+#wxBox{width:100%}
+.prov{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.msg .via{display:block;margin-top:4px;font-size:.72rem;color:var(--muted)}
 </style>
 
 <div class="wrap">
@@ -647,6 +655,7 @@ function renderAjustes(){
       <label class="f">Salida estimada si no registro nada<input type="time" id="a-estSalida" value="${c.estSalida}"></label>
       <label class="f">Traslado a la iglesia (min)<input type="number" id="a-churchTravel" min="0" value="${c.churchTravel}"></label>
     </div>
+    <label class="f">Mi distrito en la provincia de Lima (para el clima)<select id="a-zona">${Object.entries(ZONAS).map(([k,z])=>`<option value="${k}" ${c.zona===k?"selected":""}>${z.n}</option>`).join("")}</select></label>
     <label class="f">Máximo de tareas flexibles por día (min)<input type="number" id="a-maxFlex" min="30" step="15" value="${c.maxFlex}"></label>
     <p class="note">Con despertar a las ${fmt(toM(c.wake))} y ${c.goal} h de sueño, deberías acostarte a las ${fmt(toM(c.wake)-Math.round(c.goal*60))} y empezar a prepararte 30 min antes. El tope de tareas por día evita llenar todos tus espacios libres.</p>
    </section>
@@ -663,6 +672,7 @@ function renderAjustes(){
     if(k==="mats") c.mats=el.value.split("\n").map(s=>s.trim()).filter(Boolean);
     else c[k]=el.type==="number"?+el.value:el.value;
     save(); render();
+    if(k==="zona") cargarClima(true).then(()=>{ pintarClima(); programarAlarmas(); });
   });
 }
 
@@ -738,7 +748,9 @@ const canal = (cat, modo) => modo==="voz" ? `bela-voz-${cat}-${CH_VER}` : modo==
 function alarmasDe(date){
   const d=computeDay(date), av=avCfg(), out=[]; const plan=planWeek(monday(date)); const di=(d.wd+6)%7;
   const add=(cat,m,t,b,habla)=>out.push({cat,m,t,b,habla,date,key:`${date}|${cat}|${t}`});
-  add("despertar", d.wake, "Buenos días ⏰", "Hora de levantarte y tu devocional breve.", resumenDia(date,true));
+  const cl = (typeof consejoClima==="function" && S.clima) ? consejoClima(date,true) : "";
+  const dia0 = (typeof climaDia==="function") ? climaDia(date) : null;
+  add("despertar", d.wake, "Buenos días ⏰", dia0?`Hora de levantarte. Hoy ${Math.round(dia0.min)}° a ${Math.round(dia0.max)}°. Toca para escuchar tu día.`:"Hora de levantarte y tu devocional breve.", resumenDia(date,true)+(cl?" "+cl:""));
   if(d.wake < toM("07:23")) add("salida", toM("07:23"), "Salir al negocio", d.from==="negocio"?"Hoy estudias desde el negocio: lleva laptop, cargador y audífonos.":"Sales ahora para llegar a las 7:30 a. m.");
   if(d.negFin<d.salida && d.wd!==0) add("salida", d.negFin-10, "Prepárate para regresar a casa", "En 10 minutos sales del negocio para llegar a tu clase.");
   for(const b of d.blocks){
@@ -749,7 +761,7 @@ function alarmasDe(date){
   }
   for(const f of plan.placed[di]) add("tarea", f.s-(+av.tarea.min||0), f.l, `Bloque flexible de ${f.e-f.s} minutos.`);
   if(d.lastEnd+30>d.bed) add("dormir", d.lastEnd, "A descansar", "Noche corta: deja lo no urgente para mañana.");
-  else add("dormir", d.sleepStart-(+av.dormir.min||30), "Prepárate para dormir", `Meta: dormir a ${say(d.sleepStart)}. Deja listo lo de mañana.`, resumenDia(addD(date,1),false));
+  else add("dormir", d.sleepStart-(+av.dormir.min||30), "Prepárate para dormir", `Meta: dormir a ${say(d.sleepStart)}. Deja listo lo de mañana.`, resumenDia(addD(date,1),false)+((typeof consejoClima==="function"&&S.clima&&climaDia(addD(date,1)))?" "+consejoClima(addD(date,1),true)+" Deja tu ropa lista desde ahora.":""));
   // ediciones del usuario
   for(const a of out){ const ov=S.alOv[a.key]; a.off=!!(ov&&ov.off); a.editada=!!(ov&&ov.min!=null); if(a.editada) a.m=ov.min; a.at=new Date(pd(date)); a.at.setHours(0,a.m,0,0); }
   return out.sort((x,y)=>x.m-y.m);
@@ -1132,9 +1144,16 @@ function responder(entrada){
     const ch = p.days.reduce((a,d)=>a+d.alerts.filter(x=>x.lvl==="bad").length,0);
     return `Esta semana ${w.st==="flexible"?"es flexible":"planeas estudiar desde casa el "+((w.homeDays||[]).map(x=>DN[x].toLowerCase()).join(" y el ")||"ningún día aún")+(w.st==="confirmada"?", ya confirmado con tu mamá":", pero falta conversarlo con tu mamá")}. ${ch?`Tienes ${ch} avisos importantes.`:"No hay choques."} ${malas.length?"Noches cortas: "+malas.join(", ")+".":"Todas las noches alcanzas tu meta de sueño."}`;
   }
-  if(/^(que tengo|que hay|que me toca|como es mi dia|mi agenda de|mi horario de)? ?manana$|que tengo (para )?manana/.test(t)) return resumenDia(addD(hoy,1), false);
-  if(/^(que hora es|dime la hora)$/.test(t)) return `Son ${say(ahora)}.`;
-  if(/^(que tengo( hoy)?|que hay hoy|mi dia|mi agenda|mi horario|que me toca hoy|que tengo que hacer hoy|agenda de hoy|como es mi dia)$/.test(t)) return resumenDia(hoy, false);
+  if(/^(que tengo|que hay|que me toca|como es mi dia|mi agenda de|mi horario de)? ?manana$|que tengo (para )?manana/.test(t)) return (resumenDia(addD(hoy,1), false)+" "+consejoClima(addD(hoy,1),true)).trim();
+  if(/^(que hora es|dime la hora|que hora es en peru|hora de peru)$/.test(t)){ const p=new Intl.DateTimeFormat("en-GB",{timeZone:"America/Lima",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date()).split(":").map(Number); return `Son ${say(p[0]*60+p[1])}, hora de Perú.`; }
+  if(/\b(clima|que tiempo hace|como esta el tiempo|temperatura|hace frio|hara frio|hace calor|hara calor|abrig\w*|chompa|casaca|chalina|que me pongo|como me visto|que ropa|llover|llovera|lluvia|garua|garuara|bloqueador|sol fuerte|rayos uv)\b/.test(t) && !/^(por que|como se forma|que es (el|la) )/.test(t)){
+    const f = /\bmanana\b/.test(t.replace(/de la manana/g,"")) ? addD(hoy,1) : hoy;
+    return (async()=>{ await cargarClima(); pintarClima();
+      if(!S.clima) return `No pude obtener el clima de ${zona().n}. Revisa tu internet e inténtalo otra vez.`;
+      const ahoraTxt = f===hoy && /\b(clima|tiempo|temperatura|ahora)\b/.test(t) ? (climaAhora()||"")+" " : "";
+      return ahoraTxt + consejoClima(f); })();
+  }
+  if(/^(que tengo( hoy)?|que hay hoy|mi dia|mi agenda|mi horario|que me toca hoy|que tengo que hacer hoy|agenda de hoy|como es mi dia)$/.test(t)) return (resumenDia(hoy, false)+" "+consejoClima(hoy,true)).trim();
   if(/^(muchas )?gracias( bela)?$/.test(t)) return `Con gusto, ${nombre()}. Aquí estoy cuando me necesites.`;
   if(/^(ayuda|que puedes hacer|como funcionas|que sabes hacer)$/.test(t)) return ayudaTexto();
   if(/^(hola|buenos dias|buenas tardes|buenas noches|bela|hola bela)$/.test(t)) return saludo();
@@ -1156,14 +1175,14 @@ function resumenTramo(date, desde, hasta, etiqueta){
   return `Así queda ${etiqueta}: ` + items.map(b=>`${say(b.s)}, ${limpio(b.l)}`).join("; ") + ". Lo demás es tiempo libre.";
 }
 function ayudaTexto(){
-  return "Puedes decirme: qué tengo hoy o mañana, qué sigue, hoy dormiré a las once, mañana me levanto a las seis, reorganiza mi día, ya hice mi ejercicio, hoy no haré la tarea de la universidad, tengo una reunión el miércoles a las siete de la noche, mi mamá regresó a las diez, o recuérdame llamar a una señorita a las cinco.";
+  return "Puedes decirme: qué tengo hoy o mañana, qué sigue, hoy dormiré a las once, mañana me levanto a las seis, reorganiza mi día, ya hice mi ejercicio, hoy no haré la tarea de la universidad, tengo una reunión el miércoles a las siete de la noche, mi mamá regresó a las diez, recuérdame llamar a una señorita a las cinco, o ¿debo abrigarme hoy?";
 }
 function saludo(){
   const h = new Date().getHours();
   const s = h<12?"Buenos días":h<19?"Buenas tardes":"Buenas noches";
   const d = computeDay(ds(new Date())), ahora = h*60+new Date().getMinutes();
   const b = bloquesDesde(ds(new Date()), ahora, 24*60).find(x=>x.s>=ahora);
-  return `${s}, ${nombre()}. Soy BELA, tu asistente.${b?` Lo próximo: ${limpio(b.l)} a ${say(b.s)}.`:" Ya no tienes más compromisos hoy."} ¿En qué te ayudo?`;
+  return `${s}, ${nombre()}. Soy BELA, tu asistente.${b?` Lo próximo: ${limpio(b.l)} a ${say(b.s)}.`:" Ya no tienes más compromisos hoy."} ${S.clima&&S.clima.cur?` Ahora hay ${Math.round(S.clima.cur.temperature_2m)} grados en ${zona().n}.`:""} ¿En qué te ayudo?`;
 }
 
 /* orbe animado */
@@ -1228,13 +1247,14 @@ function renderAsistente(){
   const c=S.cfg;
   view.innerHTML=`<div class="grid2">
    <section class="panel stack bela">
+     <div id="wxBox">${tarjetaClima()}</div>
      <div id="orb" class="orb" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
      <div class="hud" id="orbSt">BELA · EN LÍNEA</div>
      <p id="asTexto" class="say">Hola, ${esc(nombre())}. Toca el micrófono y háblame.</p>
      <button class="mic" id="mic" aria-label="Hablar con BELA"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg><span>Hablar con BELA</span></button>
      <form id="belaForm" class="row ask"><input type="text" id="belaIn" placeholder="Pregúntale lo que quieras" aria-label="Escribe a BELA"><button class="btn" type="submit">Enviar</button></form>
      <div class="chips">
-       ${["¿Qué tengo hoy?","¿Qué sigue?","Reorganiza mi día","¿A qué hora debo dormir?","¿Cuántas horas dormiré?","¿Qué tengo mañana?"].map(q=>`<button class="chip" data-q="${q}">${q}</button>`).join("")}
+       ${["¿Qué tengo hoy?","¿Debo abrigarme?","¿Qué sigue?","Reorganiza mi día","¿A qué hora debo dormir?","¿Qué tengo mañana?"].map(q=>`<button class="chip" data-q="${q}">${q}</button>`).join("")}
        <button class="chip" data-callar="1">Silencio</button>
      </div>
      <div class="log" id="belaLog"></div>
@@ -1265,21 +1285,33 @@ function renderAsistente(){
   bindIA();
 }
 
-/* ================= BELA + IA (v3: conexión robusta con Gemini) ================= */
-const IA_LS = "bela-ia-clave";
+/* ================= BELA + varias IA (v5: Gemini, Groq, OpenRouter, Mistral con cambio automático) ================= */
+const IA_LS = "bela-ia-clave";   // clave de Gemini (se mantiene la que ya guardaste)
 const IA_MODELOS = ["gemini-3.5-flash-lite","gemini-3.8-flash","gemini-3.6-flash","gemini-2.5-flash","gemini-flash-latest"];
 const IA_URL = "https://generativelanguage.googleapis.com/v1beta/";
-let iaHist = [];
+let iaHist = [], ultimaVia = "";
 S.iaDiag = S.iaDiag || {};
-const iaClave = () => { try{ return (localStorage.getItem(IA_LS)||"").trim(); }catch(e){ return ""; } };
-const iaGuardar = k => { try{ k?localStorage.setItem(IA_LS,k.trim()):localStorage.removeItem(IA_LS); }catch(e){} };
-const sinMarkdown = x => x.replace(/```[\s\S]*?```/g," ").replace(/[*_#>`]+/g,"").replace(/^\s*[-•]\s+/gm,"").replace(/\n{2,}/g,"\n").trim();
+S.iaProv = S.iaProv || {};       // estado por proveedor: {pausa, ok, diag, modelo}
+const sinMarkdown = x => x.replace(/<think>[\s\S]*?<\/think>/g," ").replace(/```[\s\S]*?```/g," ").replace(/[*_#>`]+/g,"").replace(/^\s*[-•]\s+/gm,"").replace(/\n{2,}/g,"\n").trim();
 const espera_ = ms => new Promise(r=>setTimeout(r,ms));
 const HTTP = plug("CapacitorHttp");
 
-/* Petición con conexión nativa del celular (más estable) y respaldo con fetch */
-async function iaHttp(metodo, ruta, cuerpo, clave, ms){
-  const url = IA_URL + ruta, headers = {"Content-Type":"application/json","x-goog-api-key":clave};
+const PROVS = {
+  gemini:     {n:"Gemini (Google)", ls:IA_LS,              web:"aistudio.google.com/apikey",   limite:"unas 20 a 1.500 preguntas al día según el modelo"},
+  groq:       {n:"Groq",            ls:"bela-ia-groq",       web:"console.groq.com/keys",        limite:"unas 1.000 preguntas al día", url:"https://api.groq.com/openai/v1/chat/completions",
+               modelos:["openai/gpt-oss-120b","llama-3.3-70b-versatile","openai/gpt-oss-20b","llama-3.1-8b-instant"]},
+  openrouter: {n:"OpenRouter",      ls:"bela-ia-openrouter", web:"openrouter.ai/keys",           limite:"unas 50 preguntas al día", url:"https://openrouter.ai/api/v1/chat/completions",
+               modelos:["meta-llama/llama-3.3-70b-instruct:free","openai/gpt-oss-120b:free","google/gemma-3-27b-it:free","mistralai/mistral-small-3.2-24b-instruct:free"]},
+  mistral:    {n:"Mistral",         ls:"bela-ia-mistral",    web:"console.mistral.ai/api-keys",  limite:"plan gratuito «Experiment»", url:"https://api.mistral.ai/v1/chat/completions",
+               modelos:["mistral-small-latest","open-mistral-nemo"]}
+};
+const clave = id => { try{ return (localStorage.getItem(PROVS[id].ls)||"").trim(); }catch(e){ return ""; } };
+const guardarClave = (id,k) => { try{ k?localStorage.setItem(PROVS[id].ls,k.replace(/\s+/g,"")):localStorage.removeItem(PROVS[id].ls); }catch(e){} };
+const iaClave = () => clave("gemini");
+const provEstado = id => (S.iaProv[id] = S.iaProv[id] || {});
+
+/* HTTP genérico: conexión nativa del celular y respaldo con fetch */
+async function httpJSON(url, metodo, headers, cuerpo, ms){
   if(HTTP && HTTP.request){
     let tm; const tiempo = new Promise((_,rej)=>{ tm=setTimeout(()=>rej(Object.assign(new Error("timeout"),{name:"Timeout"})), ms); });
     tiempo.catch(()=>{});
@@ -1287,141 +1319,336 @@ async function iaHttp(metodo, ruta, cuerpo, clave, ms){
       const r = await Promise.race([HTTP.request({url, method:metodo, headers, data:cuerpo, connectTimeout:ms, readTimeout:ms}), tiempo]);
       clearTimeout(tm);
       let data = r.data; if(typeof data==="string"){ try{ data=JSON.parse(data); }catch(e){ data={raw:data}; } }
-      return {status:r.status, data};
-    }catch(e){ clearTimeout(tm); if(e.name==="Timeout") throw e; /* si falla lo nativo, probamos fetch */ }
+      return {status:r.status, data:data||{}};
+    }catch(e){ clearTimeout(tm); if(e.name==="Timeout") throw e; }
   }
   const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), ms);
   try{
     const res = await fetch(url, {method:metodo, headers, body:cuerpo?JSON.stringify(cuerpo):undefined, signal:ctl.signal});
-    const data = await res.json().catch(()=>({}));
-    return {status:res.status, data};
+    return {status:res.status, data:await res.json().catch(()=>({}))};
   }catch(e){ if(e.name==="AbortError") throw Object.assign(new Error("timeout"),{name:"Timeout"}); throw e; }
   finally{ clearTimeout(t); }
 }
+const iaHttp = (metodo, ruta, cuerpo, k, ms) => httpJSON(IA_URL+ruta, metodo, {"Content-Type":"application/json","x-goog-api-key":k}, cuerpo, ms);
 
 function contextoIA(){
-  const hoy = ds(new Date()), ahora = new Date().getHours()*60+new Date().getMinutes();
+  const hoy = ds(new Date());
   let dia="", man="";
   try{ dia=resumenDia(hoy,false); man=resumenDia(addD(hoy,1),false); }catch(e){}
+  let zonaTxt="Lima", climaTxt="sin datos", hora="";
+  try{ zonaTxt=zona().n; hora=horaPeru(); climaTxt=((S.clima&&climaAhora())||"sin datos")+" "+((S.clima&&consejoClima(hoy,true))||""); }catch(e){}
   return `Eres BELA, la asistente personal por voz de ${nombre()}, una estudiante universitaria de Ingeniería de Sistemas en Lima, Perú. Hablas en español peruano, con calidez, de forma clara y breve.
 Responde cualquier pregunta que te haga, de cualquier tema: estudios, Biblia, cocina, consejos, cultura general, tecnología, matemática, redacción, etc.
-Tus respuestas se leen en voz alta: usa 2 a 6 frases cortas, sin listas largas, sin símbolos, sin markdown, sin emojis. Si piden algo largo (un resumen, un texto, una explicación detallada), da lo esencial y ofrece continuar.
+Tus respuestas se leen en voz alta: usa 2 a 6 frases cortas, sin listas largas, sin símbolos, sin markdown, sin emojis. Si piden algo largo, da lo esencial y ofrece continuar.
 Si no sabes algo o puede haber cambiado, dilo con honestidad. Para temas de salud, legales o de dinero, da información general y sugiere consultar a un profesional.
 No inventes compromisos. Si te pide cambiar su horario, dile que use frases como «hoy dormiré a las once», «reorganiza mi día» o que lo edite en la pestaña Mi horario.
-Ahora son ${say(ahora)} del ${nice(hoy).toLowerCase()}.
+Vive en ${zonaTxt}, provincia de Lima, Perú. Usa siempre la hora de Perú (UTC−5). Ahora son ${hora} del ${nice(hoy).toLowerCase()}, hora de Perú.
+Clima: ${climaTxt}
 Su día de hoy: ${dia}
 Mañana: ${man}`;
 }
 
-function iaError(status, data, e){
-  const msg = (data&&data.error&&data.error.message)||"";
-  S.iaDiag = {cuando:new Date().toLocaleString("es-PE"), status:status||0, msg:(msg||(e&&e.message)||"").slice(0,220)};
-}
-
-async function descubrirModelo(clave){
+/* ---- Gemini ---- */
+async function descubrirModelo(k){
   try{
-    const r = await iaHttp("GET","models?pageSize=100",null,clave,15000);
+    const r = await iaHttp("GET","models?pageSize=100",null,k,15000);
     const ms = ((r.data&&r.data.models)||[]).filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")).map(m=>m.name.replace("models/",""));
     return ms.find(m=>/flash-lite/.test(m)&&!/preview|image|tts|live|audio/.test(m)) || ms.find(m=>/flash/.test(m)&&!/preview|image|tts|live|audio/.test(m)) || ms[0] || null;
   }catch(e){ return null; }
 }
-
-async function preguntarIA(pregunta){
-  const clave = iaClave();
-  if(!clave) return `Para responder preguntas de cualquier tema necesito que me conectes a la inteligencia de Google. Ve abajo, a «Preguntas libres», y pega tu clave gratuita.`;
-  if(navigator.onLine === false) return "No tengo internet ahora. Las órdenes de tu horario sí funcionan sin conexión. Vuelve a preguntarme cuando tengas señal.";
-  const contents = [...iaHist, {role:"user", parts:[{text:pregunta}]}];
-  const cuerpo = (pensar) => { const gc={maxOutputTokens:4096, temperature:0.7}; if(!pensar) gc.thinkingConfig={thinkingBudget:0};
+async function askGemini(q, k){
+  const contents = [...iaHist, {role:"user", parts:[{text:q}]}];
+  const cuerpo = pensar => { const gc={maxOutputTokens:4096, temperature:0.7}; if(!pensar) gc.thinkingConfig={thinkingBudget:0};
     return {systemInstruction:{parts:[{text:contextoIA()}]}, contents, generationConfig:gc}; };
-  let modelos = [S.cfg.iaModelo, ...IA_MODELOS].filter((m,i,a)=>m && a.indexOf(m)===i);
-  let descubierto = false, ultimo = "";
+  const st0 = provEstado("gemini");
+  let modelos = [st0.modelo, ...IA_MODELOS].filter((m,i,a)=>m && a.indexOf(m)===i), descubierto=false, ultimo="otro", detalle="";
   for(let mi=0; mi<modelos.length; mi++){
-    const m = modelos[mi];
-    let sinPensar = !(S.cfg.iaPensar||{})[m];
-    for(let intento=0; intento<3; intento++){
+    const m = modelos[mi]; let sinPensar = !(S.cfg.iaPensar||{})[m];
+    for(let intento=0; intento<2; intento++){
       let r;
-      try{ r = await iaHttp("POST", `models/${m}:generateContent`, cuerpo(!sinPensar), clave, 40000); }
-      catch(e){ iaError(0,null,e); ultimo = e.name==="Timeout" ? "lento" : "red"; await espera_(1200*(intento+1)); continue; }
-      const st = r.status, data = r.data||{}, msg = (data.error&&data.error.message)||"";
+      try{ r = await iaHttp("POST", `models/${m}:generateContent`, cuerpo(!sinPensar), k, 40000); }
+      catch(e){ ultimo = e.name==="Timeout"?"lento":"red"; detalle=e.message; await espera_(1200); continue; }
+      const st=r.status, data=r.data||{}, msg=(data.error&&data.error.message)||""; detalle=`${st} ${msg}`;
       if(st===200){
-        const cand = (data.candidates||[])[0];
-        const txt = sinMarkdown(((cand&&cand.content&&cand.content.parts)||[]).filter(p=>!p.thought).map(p=>p.text||"").join(""));
-        if(!txt){
-          if(data.promptFeedback&&data.promptFeedback.blockReason) return "Prefiero no responder eso. ¿Te ayudo con otra cosa?";
-          if(cand && cand.finishReason==="SAFETY") return "Prefiero no responder eso. ¿Te ayudo con otra cosa?";
-          iaError(st,{error:{message:"Respuesta vacía ("+(cand&&cand.finishReason)+")"}}); ultimo="vacia"; continue;
-        }
-        S.cfg.iaModelo = m; S.iaDiag = {ok:true, cuando:new Date().toLocaleString("es-PE"), modelo:m};
-        iaHist.push({role:"user",parts:[{text:pregunta}]},{role:"model",parts:[{text:txt}]});
-        if(iaHist.length>12) iaHist = iaHist.slice(-12);
-        try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
-        return txt;
+        const cand=(data.candidates||[])[0];
+        const txt=sinMarkdown(((cand&&cand.content&&cand.content.parts)||[]).filter(p=>!p.thought).map(p=>p.text||"").join(""));
+        if(txt) return {ok:true, txt, modelo:m};
+        if((data.promptFeedback&&data.promptFeedback.blockReason) || (cand&&cand.finishReason==="SAFETY")) return {err:"bloqueo"};
+        ultimo="vacia"; continue;
       }
-      iaError(st,data);
-      if(st===400 && /thinking/i.test(msg) && sinPensar){ sinPensar=false; S.cfg.iaPensar=Object.assign({},S.cfg.iaPensar,{[m]:true}); continue; }
-      if(st===404 || (st===400 && /model|not found|not supported/i.test(msg))){
-        if(!descubierto){ descubierto=true; const d=await descubrirModelo(clave); if(d && !modelos.includes(d)) modelos.splice(mi+1,0,d); }
-        ultimo="modelo"; break;
-      }
-      if(st===401 || st===403 || (st===400 && /api.?key|credential|auth|token/i.test(msg))) return claveMala(msg);
-      if(st===429){ ultimo="limite"; if(/day|daily|per day|quota/i.test(msg) && intento>0) break; await espera_(3000*(intento+1)); continue; }
-      if(st>=500 || st===0){ ultimo="servidor"; await espera_(1500*(intento+1)); continue; }
-      ultimo="otro"; break;
+      if(st===400 && /thinking/i.test(msg) && sinPensar){ sinPensar=false; S.cfg.iaPensar=Object.assign({},S.cfg.iaPensar,{[m]:true}); intento--; continue; }
+      if(st===404 || (st===400 && /model|not found|not supported/i.test(msg))){ if(!descubierto){ descubierto=true; const d=await descubrirModelo(k); if(d&&!modelos.includes(d)) modelos.splice(mi+1,0,d); } ultimo="modelo"; break; }
+      if(st===401 || st===403 || (st===400 && /api.?key|credential|auth|token/i.test(msg))) return {err:"clave", msg:detalle};
+      if(st===429){ ultimo="limite"; break; }            // cada modelo tiene su propio cupo: probar el siguiente
+      if(st>=500 || st===0){ ultimo="servidor"; await espera_(1500); continue; }
+      break;
     }
   }
-  return {lento:"Google está tardando mucho en responder. Revisa tu señal e inténtalo otra vez.",
-          red:"No pude conectarme a internet. Revisa tus datos o wifi e inténtalo otra vez.",
-          limite:"Llegué al límite gratuito de preguntas por ahora. Espera un minuto e inténtalo de nuevo.",
-          servidor:"Los servidores de Google están ocupados. Inténtalo otra vez en unos segundos.",
-          vacia:"No me llegó la respuesta completa. ¿Me lo preguntas otra vez?",
-          modelo:"No encontré un modelo de Google disponible para tu clave. Revisa «Preguntas libres» y toca Probar conexión."}[ultimo]
-         || "No pude responder ahora. Toca «Probar conexión» en Preguntas libres para ver qué pasa.";
+  return {err:ultimo, msg:detalle};
 }
-function claveMala(msg){
-  if(/ACCESS_TOKEN_TYPE_UNSUPPORTED|token type/i.test(msg)) return "Google no acepta este tipo de clave en tu cuenta. Crea una clave nueva en AI Studio y pégala en «Preguntas libres».";
-  return "Tu clave de Google no funciona. Revisa que la copiaste completa en «Preguntas libres», o crea una nueva.";
+
+/* ---- Groq, OpenRouter y Mistral (formato compatible con OpenAI) ---- */
+async function askOpenAI(id, q, k){
+  const P = PROVS[id], est = provEstado(id);
+  const mensajes = [{role:"system",content:contextoIA()}, ...iaHist.map(h=>({role:h.role==="model"?"assistant":"user",content:h.parts[0].text})), {role:"user",content:q}];
+  const headers = {"Content-Type":"application/json","Authorization":"Bearer "+k};
+  if(id==="openrouter"){ headers["X-Title"]="BELA"; headers["HTTP-Referer"]="https://github.com/Brigit19/ASISTENTE"; }
+  let modelos = [est.modelo, ...P.modelos].filter((m,i,a)=>m && a.indexOf(m)===i), ultimo="otro", detalle="";
+  for(const m of modelos){
+    let razonar = id==="groq" && /gpt-oss/.test(m);
+    for(let intento=0; intento<2; intento++){
+      const cuerpo = {model:m, messages:mensajes, max_tokens:1500, temperature:0.7};
+      if(razonar) cuerpo.reasoning_effort = "low";
+      let r;
+      try{ r = await httpJSON(P.url, "POST", headers, cuerpo, 40000); }
+      catch(e){ ultimo = e.name==="Timeout"?"lento":"red"; detalle=e.message; await espera_(1000); continue; }
+      const st=r.status, data=r.data||{}, msg=(data.error&&(data.error.message||data.error.code))||""; detalle=`${st} ${msg}`;
+      if(st===200){
+        const c = (data.choices||[])[0];
+        const txt = sinMarkdown((c&&c.message&&c.message.content)||"");
+        if(txt) return {ok:true, txt, modelo:m};
+        ultimo="vacia"; break;
+      }
+      if(st===400 && /reasoning/i.test(msg) && razonar){ razonar=false; intento--; continue; }
+      if(st===401 || st===403) return {err:"clave", msg:detalle};
+      if(st===404 || ((st===400||st===422) && /model/i.test(msg))){ ultimo="modelo"; break; }
+      if(st===402){ return {err:"limite", msg:detalle}; }
+      if(st===429){ ultimo="limite"; break; }
+      if(st>=500 || st===0){ ultimo="servidor"; await espera_(1200); continue; }
+      break;
+    }
+  }
+  return {err:ultimo, msg:detalle};
+}
+
+/* ---- Orquestador: usa la primera IA disponible y cambia sola si una se agota ---- */
+function ordenProveedores(){
+  const conClave = Object.keys(PROVS).filter(id=>clave(id));
+  const ult = S.iaUlt && conClave.includes(S.iaUlt) ? [S.iaUlt] : [];
+  return [...ult, ...conClave.filter(id=>!ult.includes(id))];
+}
+async function preguntarIA(pregunta){
+  ultimaVia = "";
+  const lista = ordenProveedores();
+  if(!lista.length) return "Para responder preguntas de cualquier tema necesito que me conectes a una inteligencia artificial. Ve abajo, a «Preguntas libres», y pega al menos una clave gratuita.";
+  if(navigator.onLine === false) return "No tengo internet ahora. Las órdenes de tu horario y el resto de la app sí funcionan sin conexión.";
+  const ahora = Date.now(), errores = {};
+  const disponibles = lista.filter(id=>!(provEstado(id).pausa>ahora));
+  const orden = disponibles.length ? disponibles : lista;   // si todas están en pausa, igual intentamos
+  for(const id of orden){
+    const k = clave(id), est = provEstado(id);
+    let r;
+    try{ r = id==="gemini" ? await askGemini(pregunta,k) : await askOpenAI(id,pregunta,k); }
+    catch(e){ r = {err:"red", msg:e.message}; }
+    if(r.ok){
+      Object.assign(est, {ok:Date.now(), modelo:r.modelo, pausa:0, diag:""});
+      S.iaUlt = id; ultimaVia = PROVS[id].n;
+      S.iaDiag = {ok:true, cuando:new Date().toLocaleString("es-PE"), modelo:`${PROVS[id].n} · ${r.modelo}`};
+      iaHist.push({role:"user",parts:[{text:pregunta}]},{role:"model",parts:[{text:r.txt}]});
+      if(iaHist.length>12) iaHist = iaHist.slice(-12);
+      try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+      return r.txt;
+    }
+    if(r.err==="bloqueo") return "Prefiero no responder eso. ¿Te ayudo con otra cosa?";
+    errores[id] = r.err;
+    est.diag = `${new Date().toLocaleTimeString("es-PE",{hour:"numeric",minute:"2-digit"})} · ${r.err==="limite"?"se agotó el cupo gratuito":r.err==="clave"?"la clave no funciona":r.err} ${r.msg?"("+String(r.msg).slice(0,140)+")":""}`;
+    if(r.err==="limite") est.pausa = Date.now()+30*60000;          // descansa 30 min y probamos las otras
+    if(r.err==="clave")  est.pausa = Date.now()+6*3600000;
+  }
+  S.iaDiag = {cuando:new Date().toLocaleString("es-PE"), status:"", msg:Object.entries(errores).map(([id,e])=>PROVS[id].n+": "+e).join(" · ")};
+  try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+  const v = Object.values(errores);
+  if(v.length && v.every(e=>e==="limite")) return lista.length>1
+    ? "Se agotaron las preguntas gratuitas de todas tus inteligencias por ahora. Vuelve a intentarlo en un rato, o agrega otra clave en «Preguntas libres»."
+    : "Se agotaron las preguntas gratuitas de esta inteligencia por ahora. Agrega otra en «Preguntas libres», por ejemplo Groq, y seguiremos conversando.";
+  if(v.every(e=>e==="red"||e==="lento")) return "No pude conectarme. Revisa tus datos o wifi e inténtalo otra vez.";
+  if(v.includes("clave") && v.length===1) return "La clave de "+PROVS[Object.keys(errores)[0]].n+" no funciona. Revísala en «Preguntas libres» o crea una nueva.";
+  return "No pude responder ahora. Revisa «Preguntas libres» para ver qué pasó con cada inteligencia.";
 }
 
 conversar = async function(entrada){
   if(!entrada || !entrada.trim()) return;
   let r;
   try{ r = responder(entrada); }catch(e){ r = null; }
-  belaLog.push({tu: entrada.trim(), bela: r ?? "Pensando…"}); if(belaLog.length>8) belaLog.shift();
+  belaLog.push({tu: entrada.trim(), bela: (r && typeof r==="string") ? r : "Pensando…"}); if(belaLog.length>8) belaLog.shift();
   pintarLog();
+  if(r && typeof r.then==="function"){ orbe("piensa"); try{ r = await r; }catch(e){ r = "No pude revisar eso ahora. Inténtalo otra vez."; } belaLog[belaLog.length-1].bela=r; pintarLog(); orbe(""); }
   if(r === null){
     orbe("piensa");
     try{ r = await preguntarIA(entrada); }catch(e){ r = "Tuve un problema al pensar la respuesta. Inténtalo otra vez."; }
-    belaLog[belaLog.length-1].bela = r; pintarLog(); orbe(""); pintarIA();
+    const ult = belaLog[belaLog.length-1]; ult.bela = r; ult.via = ultimaVia; pintarLog(); orbe(""); pintarIA();
   }
   hablar(r);
 };
+pintarLog = function(){
+  const el=document.getElementById("belaLog"); if(!el) return;
+  el.innerHTML = belaLog.map(x=>`<div class="msg tu">${esc(x.tu)}</div><div class="msg bela">${esc(x.bela)}${x.via?`<small class="via">vía ${esc(x.via)}</small>`:""}</div>`).join("");
+  el.scrollTop = el.scrollHeight;
+};
 
 function panelIA(){
-  const k = iaClave(), d = S.iaDiag||{};
-  const estado = !k ? `<span class="pill p-warn">Sin conectar</span>`
-    : d.ok ? `<span class="pill p-ok">Conectada ✓</span>`
-    : d.status!=null&&d.cuando ? `<span class="pill p-bad">Último intento falló</span>` : `<span class="pill p-lav">Clave guardada</span>`;
+  const lista = ordenProveedores(), ahora = Date.now();
+  const fila = id => { const P=PROVS[id], k=clave(id), e=provEstado(id);
+    const pill = !k ? `<span class="pill p-warn">Sin clave</span>`
+      : e.pausa>ahora ? `<span class="pill p-warn">En pausa hasta ${new Date(e.pausa).toLocaleTimeString("es-PE",{hour:"numeric",minute:"2-digit"})}</span>`
+      : e.ok ? `<span class="pill p-ok">Conectada ✓</span>` : `<span class="pill p-lav">Clave guardada</span>`;
+    return `<div class="prov">
+      <div class="row" style="justify-content:space-between"><b>${P.n}</b>${pill}</div>
+      <span class="note">Gratis: ${P.limite}. Clave en <span class="sel">${P.web}</span></span>
+      <div class="row ask"><input type="password" id="k-${id}" placeholder="${k?"Guardada ••••"+esc(k.slice(-4)):"Pega aquí la clave de "+P.n}" autocomplete="off" aria-label="Clave de ${P.n}">
+        <button class="btn sm" data-ksave="${id}">${k?"Cambiar":"Guardar"}</button>${k?`<button class="btn ghost sm" data-kdel="${id}">Quitar</button>`:""}</div>
+      ${e.diag&&k?`<span class="note diag">Último problema: ${esc(e.diag)}</span>`:""}
+    </div>`; };
   return `<div id="iaBox" class="stack"><h3>Preguntas libres</h3>
-   <p class="note">BELA responde sola todo lo de tu horario. Para cualquier otra pregunta se conecta a Gemini, la inteligencia gratuita de Google. Necesita internet.</p>
-   <p class="note"><b>Clave gratis:</b> entra a <span class="sel">aistudio.google.com/apikey</span> → <b>Crear clave</b> → <b>Copiar clave</b> y pégala aquí.</p>
-   <div class="row ask"><input type="password" id="iaKey" placeholder="${k?"Clave guardada ••••"+esc(k.slice(-4)):"Pega aquí tu clave de Google"}" aria-label="Clave de Google AI" autocomplete="off"><button class="btn sm" id="iaSave">${k?"Cambiar":"Guardar"}</button></div>
-   <div class="row">${estado}${k?`<button class="btn ghost sm" id="iaTest">Probar conexión</button><button class="btn ghost sm" id="iaDel">Quitar clave</button>`:""}</div>
-   ${d.ok?`<p class="note">Última respuesta: ${esc(d.cuando)} · ${esc(d.modelo)}</p>`:d.cuando?`<p class="note diag">Detalle del error (${esc(d.cuando)}): código ${esc(d.status)} ${esc(d.msg)}</p>`:""}
-   <p class="note">La clave se guarda solo en este celular. En el plan gratuito, Google puede usar las preguntas para mejorar su servicio: no le cuentes datos privados de otras personas.</p></div>`;
+   <p class="note">Conecta una o varias inteligencias gratuitas. BELA usa la primera disponible y, <b>si una se agota, pasa sola a la siguiente</b>, así no se corta la conversación.</p>
+   <p class="note">Orden actual: ${lista.length?lista.map(id=>PROVS[id].n).join(" → "):"ninguna conectada"}</p>
+   ${Object.keys(PROVS).map(fila).join("")}
+   <div class="row">${lista.length?`<button class="btn ghost sm" id="iaTest">Probar conexión</button><button class="btn ghost sm" id="iaReset">Reactivar pausadas</button>`:""}</div>
+   <p class="note">Las claves se guardan solo en este celular. En los planes gratuitos, estas empresas pueden usar las preguntas para mejorar sus servicios: no les cuentes datos privados de otras personas.</p></div>`;
 }
 function pintarIA(){ const b=document.getElementById("iaBox"); if(!b) return; b.outerHTML=panelIA(); bindIA(); }
 function bindIA(){
-  const $=id=>document.getElementById(id);
-  if(!$("iaSave")) return;
-  $("iaSave").onclick=()=>{ const v=$("iaKey").value.replace(/\s+/g,""); if(v.length<20){ $("iaKey").value=""; $("iaKey").placeholder="Esa clave parece incompleta"; return; } iaGuardar(v); S.iaDiag={}; iaHist=[]; pintarIA(); };
-  if($("iaTest")) $("iaTest").onclick=()=>{ iaHist=[]; conversar("Preséntate en una frase y dime un versículo corto de ánimo."); };
-  if($("iaDel")) $("iaDel").onclick=()=>{ iaGuardar(""); S.iaDiag={}; pintarIA(); };
+  const box=document.getElementById("iaBox"); if(!box) return;
+  box.querySelectorAll("[data-ksave]").forEach(b=>b.onclick=()=>{ const id=b.dataset.ksave, inp=document.getElementById("k-"+id), v=inp.value.replace(/\s+/g,"");
+    if(v.length<20){ inp.value=""; inp.placeholder="Esa clave parece incompleta"; return; }
+    guardarClave(id,v); S.iaProv[id]={}; iaHist=[]; pintarIA(); });
+  box.querySelectorAll("[data-kdel]").forEach(b=>b.onclick=()=>{ guardarClave(b.dataset.kdel,""); S.iaProv[b.dataset.kdel]={}; pintarIA(); });
+  const t=document.getElementById("iaTest"); if(t) t.onclick=()=>{ iaHist=[]; conversar("Preséntate en una frase y dime un versículo corto de ánimo."); };
+  const rs=document.getElementById("iaReset"); if(rs) rs.onclick=()=>{ for(const id in S.iaProv) S.iaProv[id].pausa=0; save(); pintarIA(); };
 }
 
 /* ---------- reiniciar y cerrar ---------- */
 const APP = plug("App");
 function reiniciarApp(){ try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){} location.reload(); }
 async function cerrarApp(){ try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){} try{ TTS&&TTS.stop(); }catch(e){} if(APP&&APP.exitApp){ try{ await APP.exitApp(); return; }catch(e){} } alarmEstado="Para cerrar, desliza la app hacia arriba en tus apps recientes."; pintarEstado(); }
+
+/* ================= Hora de Perú y clima de Lima ================= */
+const TZ_PE = "America/Lima";
+const ZONAS = {
+  ate:        {n:"Ate",                    lat:-12.026, lon:-76.918},
+  santaanita: {n:"Santa Anita",            lat:-12.043, lon:-76.971},
+  cercado:    {n:"Cercado de Lima",        lat:-12.046, lon:-77.043},
+  sjl:        {n:"San Juan de Lurigancho", lat:-11.983, lon:-77.006},
+  lamolina:   {n:"La Molina",              lat:-12.083, lon:-76.936},
+  chaclacayo: {n:"Chaclacayo",             lat:-11.976, lon:-76.770},
+  miraflores: {n:"Miraflores",             lat:-12.121, lon:-77.030},
+  comas:      {n:"Comas",                  lat:-11.933, lon:-77.050}
+};
+S.cfg.zona = S.cfg.zona || "ate";
+const zona = () => ZONAS[S.cfg.zona] || ZONAS.ate;
+
+/* Hora oficial de Perú, sin importar la configuración del celular */
+function horaPeru(){ return new Intl.DateTimeFormat("es-PE",{timeZone:TZ_PE,hour:"numeric",minute:"2-digit",hour12:true}).format(new Date()).replace(/\s?a\.?\s?m\.?/i," a. m.").replace(/\s?p\.?\s?m\.?/i," p. m."); }
+function celularEnHoraPeru(){
+  try{ const tz=Intl.DateTimeFormat().resolvedOptions().timeZone; if(tz===TZ_PE) return true; }catch(e){}
+  return new Date().getTimezoneOffset()===300;   // Perú: UTC−5 todo el año
+}
+
+/* ---------- clima (Open-Meteo, gratis y sin clave) ---------- */
+const WMO = c => c===0?"despejado":c<=2?"parcialmente nublado":c===3?"nublado":c<=48?"con neblina":c<=57?"con garúa":c<=67?"con lluvia":c<=77?"con nieve":c<=82?"con chubascos":"con tormenta";
+let climaCargando = null;
+async function cargarClima(forzar){
+  const z = zona(), c = S.clima;
+  if(!forzar && c && c.zona===S.cfg.zona && Date.now()-c.ts < 30*60000) return c;
+  if(climaCargando) return climaCargando;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${z.lat}&longitude=${z.lon}`+
+    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m`+
+    `&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,weather_code`+
+    `&daily=temperature_2m_max,temperature_2m_min,uv_index_max,precipitation_probability_max&timezone=${encodeURIComponent(TZ_PE)}&forecast_days=3`;
+  climaCargando = (async()=>{
+    try{
+      let data;
+      if(HTTP && HTTP.request){ try{ const r=await HTTP.request({url,method:"GET",connectTimeout:15000,readTimeout:15000}); data=typeof r.data==="string"?JSON.parse(r.data):r.data; }catch(e){} }
+      if(!data){ const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),15000); try{ data=await (await fetch(url,{signal:ctl.signal})).json(); } finally{ clearTimeout(t); } }
+      if(!data || !data.hourly) throw new Error("sin datos");
+      S.clima = {ts:Date.now(), zona:S.cfg.zona, cur:data.current, hourly:data.hourly, daily:data.daily};
+      try{ localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+      return S.clima;
+    }catch(e){ return S.clima || null; }
+    finally{ climaCargando=null; }
+  })();
+  return climaCargando;
+}
+
+/* valores por hora para una fecha (YYYY-MM-DD) y hora (0-23) */
+function climaHora(date, h){
+  const c=S.clima; if(!c||!c.hourly) return null;
+  const i=c.hourly.time.indexOf(`${date}T${pad(Math.max(0,Math.min(23,h)))}:00`); if(i<0) return null;
+  return {t:c.hourly.temperature_2m[i], st:c.hourly.apparent_temperature[i], hum:c.hourly.relative_humidity_2m[i], pp:c.hourly.precipitation_probability[i], code:c.hourly.weather_code[i]};
+}
+function climaDia(date){
+  const c=S.clima; if(!c||!c.daily) return null;
+  const i=c.daily.time.indexOf(date); if(i<0) return null;
+  return {max:c.daily.temperature_2m_max[i], min:c.daily.temperature_2m_min[i], uv:c.daily.uv_index_max[i], pp:c.daily.precipitation_probability_max[i]};
+}
+
+/* Momentos en que sale de casa ese día: mañana al negocio y salidas presenciales */
+function salidasDelDia(date){
+  const out=[{h:7, n:"cuando sales al negocio"}];
+  try{
+    const d=computeDay(date);
+    const fuera=d.blocks.filter(b=>(b.k==="igl"&&!b.v&&!/virtual/i.test(b.l))||(b.k==="extra"&&b.place==="fuera"));
+    if(fuera.length){
+      const ini=Math.min(...fuera.map(b=>b.s)), fin=Math.max(...fuera.map(b=>b.e));
+      out.push({h:Math.floor(ini/60), n:"cuando vas a la iglesia"});
+      out.push({h:Math.min(23,Math.floor(fin/60)), n:"al regresar en la noche"});
+    }
+  }catch(e){}
+  return out;
+}
+
+function prenda(st){
+  if(st < 14) return "abrígate bien: casaca gruesa, chompa y chalina";
+  if(st < 16.5) return "abrígate: lleva casaca y chompa";
+  if(st < 19) return "lleva una casaca o chompa";
+  if(st < 22) return "lleva una chompa ligera por si refresca";
+  return "puedes ir con ropa ligera";
+}
+
+/* Consejo hablado: clima + qué ponerse */
+function consejoClima(date, corto){
+  const z=zona(), dia=climaDia(date);
+  if(!S.clima || !dia) return corto ? "" : `Todavía no tengo el clima de ${z.n}. Revisa tu internet y pregúntame otra vez.`;
+  const hoy=ds(new Date()), cuando = date===hoy?"Hoy":date===addD(hoy,1)?"Mañana":"Ese día";
+  const sal=salidasDelDia(date).map(s=>Object.assign(s,climaHora(date,s.h)||{})).filter(s=>s.st!=null);
+  let txt = `${cuando} en ${z.n} la temperatura irá de ${Math.round(dia.min)} a ${Math.round(dia.max)} grados.`;
+  if(sal.length){
+    const frio = sal.reduce((a,b)=>a.st<b.st?a:b);
+    txt += ` ${frio.n.charAt(0).toUpperCase()+frio.n.slice(1)} se sentirá como ${Math.round(frio.st)} grados, así que ${prenda(frio.st)}.`;
+    if(frio.hum>=88 && frio.st<19) txt += " Habrá bastante humedad, y en Lima eso hace sentir más frío.";
+  }
+  const garua = sal.some(s=>s.code>=51&&s.code<=57) || (dia.pp!=null && dia.pp>=40);
+  if(garua) txt += " Puede garuar, lleva algo que te cubra.";
+  if(dia.uv!=null && dia.uv>=8) txt += ` El sol estará fuerte, índice UV ${Math.round(dia.uv)}: usa bloqueador${dia.uv>=11?" y gorra":""}.`;
+  return corto ? txt : txt;
+}
+function climaAhora(){
+  const c=S.clima; if(!c||!c.cur) return null;
+  return `Ahora en ${zona().n} hay ${Math.round(c.cur.temperature_2m)} grados, se siente como ${Math.round(c.cur.apparent_temperature)}, ${WMO(c.cur.weather_code)}, con ${Math.round(c.cur.relative_humidity_2m)} por ciento de humedad.`;
+}
+
+/* tarjeta de clima en la pestaña BELA */
+function tarjetaClima(){
+  const c=S.clima, z=zona(), hoy=ds(new Date());
+  const reloj=`<span class="clk">🕐 <b id="clkPe">${horaPeru()}</b> · Hora de Perú</span>`;
+  const aviso=celularEnHoraPeru()?"":`<p class="note diag">Tu celular no está en la hora de Perú. Ve a Ajustes → Fecha y hora → activa «Zona horaria automática» o elige Lima.</p>`;
+  if(!c||!c.cur) return `<div class="wx">${reloj}<span class="note">Cargando el clima de ${esc(z.n)}…</span>${aviso}</div>`;
+  const d=climaDia(hoy)||{}, cur=c.cur;
+  const sal=salidasDelDia(hoy).map(s=>Object.assign(s,climaHora(hoy,s.h)||{})).filter(s=>s.st!=null && s.h>=new Date().getHours());
+  const ref=sal.length?sal.reduce((a,b)=>a.st<b.st?a:b):{st:cur.apparent_temperature,n:"ahora"};
+  return `<div class="wx">
+    ${reloj}
+    <div class="wxmain"><span class="wxt">${Math.round(cur.temperature_2m)}°</span>
+      <span class="wxd"><b>${esc(z.n)}, Lima</b><small>Se siente ${Math.round(cur.apparent_temperature)}° · ${WMO(cur.weather_code)} · ${Math.round(cur.relative_humidity_2m)}% humedad</small><small>Hoy ${d.min!=null?Math.round(d.min)+"° – "+Math.round(d.max)+"°":""}${d.uv!=null?" · UV "+Math.round(d.uv):""}</small></span></div>
+    <p class="wxtip">🧥 ${esc(ref.n.charAt(0).toUpperCase()+ref.n.slice(1))}: ${esc(prenda(ref.st))}.</p>
+    ${aviso}
+    <span class="note">Actualizado ${new Date(c.ts).toLocaleTimeString("es-PE",{hour:"numeric",minute:"2-digit"})} · Open-Meteo</span>
+  </div>`;
+}
+function pintarClima(){ const el=document.getElementById("wxBox"); if(el) el.innerHTML=tarjetaClima(); }
+setInterval(()=>{ const el=document.getElementById("clkPe"); if(el) el.textContent=horaPeru(); }, 20000);
+cargarClima().then(()=>{ pintarClima(); programarAlarmas(); });
+setInterval(()=>cargarClima().then(pintarClima), 30*60000);
 
 function render(){
   document.querySelectorAll("nav button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===tab));
